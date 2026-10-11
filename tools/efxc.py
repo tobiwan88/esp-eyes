@@ -16,12 +16,13 @@ import os
 import sys
 from pathlib import Path
 
-from efx import EfxError, check, compile_file, render_gif
+from efx import EfxError, check, load_any, render_gif
 from efx.compiler import slug
 
 
 def load(path: Path) -> bytes:
-    return path.read_bytes() if path.suffix == ".efx" else compile_file(path)
+    """A JSON description or an .efx binary, whatever the extension."""
+    return load_any(path.read_bytes())
 
 
 def main(argv=None) -> int:

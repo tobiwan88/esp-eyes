@@ -128,7 +128,8 @@ def compile_efx(doc: dict[str, Any]) -> bytes:
                 x, y, size = round(_num(k, "x")), round(_num(k, "y")), round(_num(k, "size"))
                 if not (-1000 <= x <= 1000 and -1000 <= y <= 1000 and 0 <= size <= 400):
                     raise EfxError(f"{w}: x/y within -1000..1000, size within 0..400")
-                out += struct.pack("<HhhhH", t, x, y, size, rgb565(k.get("color", "white")))
+                # key colour overrides the shape colour, which overrides white
+                out += struct.pack("<HhhhH", t, x, y, size, rgb565(k.get("color", s.get("color", "white"))))
         except EfxError:
             raise
         except (TypeError, struct.error) as e:
@@ -139,6 +140,22 @@ def compile_efx(doc: dict[str, Any]) -> bytes:
         raise EfxError(f"file too big: {len(data)} bytes (max {MAX_BYTES}); use fewer shapes or keys")
     check(data)
     return data
+
+
+def load_any(data: bytes) -> bytes:
+    """Bytes of either an .efx binary or a JSON description (UTF-8, optional BOM); the name is irrelevant.
+
+    Returns validated .efx bytes. A binary is checked as-is; JSON is compiled."""
+    if data[:4] == b"EFX1":
+        check(data)
+        return data
+    try:
+        doc = json.loads(data.decode("utf-8-sig").strip())
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise EfxError("not an .efx file and not valid JSON") from e
+    if not isinstance(doc, dict):
+        raise EfxError("not an .efx file and not valid JSON")
+    return compile_efx(doc)
 
 
 def check(data: bytes) -> dict[str, Any]:
@@ -248,4 +265,4 @@ def slug(name: str) -> str:
     return s or "effect"
 
 
-__all__ = ["EfxError", "check", "compile_efx", "compile_file", "crc16", "decode", "rgb565", "slug"]
+__all__ = ["EfxError", "check", "compile_efx", "compile_file", "crc16", "decode", "load_any", "rgb565", "slug"]

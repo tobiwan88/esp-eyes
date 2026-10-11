@@ -1,7 +1,6 @@
 """eyes-studio: prepare clips, preview, upload, control devices (plan §3.8)."""
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import uuid
@@ -10,7 +9,7 @@ from pathlib import Path
 
 from clipprep.preview import preview_gif
 from clipprep.writer import encode
-from efx import EfxError, compile_efx, render_gif
+from efx import EfxError, load_any, render_gif
 from efx import check as efx_check
 from eyes_client import DeviceError
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -151,13 +150,7 @@ def create_app(registry: Registry | None = None, work_dir: Path | None = None, m
     def prepare_efx(file: UploadFile = File(...)):
         raw = file.file.read(1_000_000)
         try:
-            if raw[:4] == b"EFX1":
-                data = raw
-            else:
-                try:
-                    data = compile_efx(json.loads(raw))
-                except json.JSONDecodeError as ex:
-                    raise EfxError(f"not valid JSON: {ex}") from ex
+            data = load_any(raw)
             info = efx_check(data)
         except EfxError as ex:
             raise HTTPException(422, str(ex)) from ex

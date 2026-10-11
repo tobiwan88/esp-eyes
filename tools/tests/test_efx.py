@@ -3,7 +3,8 @@ import struct
 from pathlib import Path
 
 import pytest
-from efx import EfxError, check, compile_efx, compile_file, decode, render_gif
+from efx import EfxError, check, compile_efx, compile_file, decode, load_any, render_gif
+from efx.compiler import rgb565
 from eyes_client import Device, DeviceError
 from mock_device import TOKEN, MockDevice
 
@@ -11,7 +12,7 @@ EXAMPLES = Path(__file__).resolve().parents[2] / "examples" / "efx"
 MIN = {"duration": 1000, "shapes": [{"kind": "circle", "keys": [{"t": 0, "x": 10, "y": 20, "size": 5, "color": "red"}]}]}
 
 
-@pytest.mark.parametrize("name", ["love", "hello"])
+@pytest.mark.parametrize("name", ["love", "hello", "golden_star"])
 def test_examples_match_committed_binaries(name):
     # the .efx files are what the firmware host tests load: they must be rebuilt when the compiler changes
     assert compile_file(EXAMPLES / f"{name}.json") == (EXAMPLES / f"{name}.efx").read_bytes()
@@ -98,3 +99,64 @@ def test_all_slots_used():
             dev.upload_efx("one-more", data)
         assert e.value.status == 507
         dev.upload_efx("fx3", data)  # replacing is fine
+
+
+def _key_color(data: bytes, key_index: int = 0) -> int:
+    # one-shape, no-gaze files only: header, shape header, then 10-byte keys (colour at +8)
+    return struct.unpack_from("<H", data, 16 + 5 + key_index * 10 + 8)[0]
+
+
+def test_shape_color_is_default_for_keys_and_keys_override():
+    base = {"duration": 1000, "shapes": [{"kind": "circle", "color": "red", "keys": [
+        {"t": 0, "x": 0, "y": 0, "size": 5},
+        {"t": 500, "x": 0, "y": 0, "size": 5, "color": "blue"},
+    ]}]}
+    d = compile_efx(base)
+    assert _key_color(d, key_index=0) == 0xF904  # shape colour "red"
+    assert _key_color(d, key_index=1) == rgb565("blue")  # key override wins
+    assert _key_color(compile_efx(MIN)) == 0xF904
+    no_color = json.loads(json.dumps(MIN))
+    del no_color["shapes"][0]["keys"][0]["color"]
+    assert _key_color(compile_efx(no_color)) == 0xFFFF  # neither set: white
+
+
+def test_golden_star_example_compiles_with_its_colours():
+    doc = json.loads((EXAMPLES / "golden_star.json").read_text())
+    data = compile_efx(doc)
+    assert data == (EXAMPLES / "golden_star.efx").read_bytes()
+    colours = {s["keys"][0]["color"] for s in decode(data)["shapes"]}  # RGB565-rounded
+    assert colours == {"#f8b000", "#f8d400", "#f8f4b0", "#f8fcf8", "#f8f8d8"}
+
+
+def test_load_any_binary_and_json_with_bom():
+    binary = (EXAMPLES / "love.efx").read_bytes()
+    assert load_any(binary) == binary
+    doc = (EXAMPLES / "love.json").read_bytes()
+    assert load_any(b"\xef\xbb\xbf" + doc) == compile_efx(json.loads(doc))
+    assert load_any(b"  \n" + doc + b"\n") == compile_efx(json.loads(doc))
+
+
+@pytest.mark.parametrize("data", [b"\x00\x01garbage", b"", b"[1, 2]", b"\xff\xfe\x00", b"{not json"])
+def test_load_any_rejects_garbage(data):
+    with pytest.raises(EfxError, match="not an .efx file and not valid JSON"):
+        load_any(data)
+
+
+def test_load_any_checks_binary():
+    binary = bytearray((EXAMPLES / "love.efx").read_bytes())
+    binary[-1] ^= 0xFF
+    with pytest.raises(EfxError, match="checksum"):
+        load_any(bytes(binary))
+
+
+def test_json_saved_as_efx_builds_and_checks(tmp_path):
+    import efxc
+
+    src = tmp_path / "heart.efx"  # JSON content under an .efx name
+    src.write_bytes((EXAMPLES / "love.json").read_bytes())
+    assert efxc.main(["build", str(src)]) == 0
+    out = tmp_path / "heart.efx"
+    assert out.read_bytes() == compile_efx(json.loads((EXAMPLES / "love.json").read_text()))
+    assert efxc.main(["check", str(out)]) == 0
+    assert efxc.main(["build", str(src), "-o", str(tmp_path / "b.efx")]) == 0
+    assert (tmp_path / "b.efx").read_bytes() == out.read_bytes()

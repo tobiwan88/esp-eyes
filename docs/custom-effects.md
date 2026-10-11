@@ -1,17 +1,24 @@
 # Adding your own eye animation
 
-Goal: describe an overlay (for example a heart), turn it into **one small file**, drop that file on the eyes, and
-get a new animation button.
+Goal: describe an overlay (for example a heart), upload it to the eyes, and get a new animation button. No
+programming needed.
 
-## The short way (browser only)
+## Four steps
 
-1. Get a `.json` description (ask an assistant, see the prompt below, or start from `examples/efx/love.json`).
-2. Open **Eyes Studio** (`uv run python -m eyes_studio`) and drop the file on **New effect**. You see a preview GIF.
-3. Type a name and press **Send to device**. The new button (marked with a star) appears; it also shows under
-   **Effects on device** and in the random pool list.
+1. Open [efx-prompt.md](efx-prompt.md), copy the whole grey block into Claude on the web (claude.ai), replace the
+   idea line with your own idea, and send it.
+2. Claude replies with one block of JSON. Copy it into a text file and save it with a name ending in `.json`, for
+   example `heart.json`. (A wrong ending is fine, and a file saved as `.efx` also works.)
+3. Open the cat's page, `http://eyes-601080.local/`, scroll to **Custom effects**, choose the file, and press
+   **Upload and play**. A status line next to the button says whether it worked, or why not. If it does not work,
+   copy that message into Claude and ask for a fix (the table in `efx-prompt.md` explains the common ones).
+4. The effect now shows up as a ★ button and joins the random pool (if its box is ticked). Press the button to play
+   it any time.
 
-Already have an `.efx` file? Drop it the same way, or open the eyes' own page (`http://eyes-600ed0.local/`), section
-**Custom effects**, choose the file, press **Upload effect**.
+Optional: **Eyes Studio** (`uv run python -m eyes_studio`) shows a preview GIF before you upload. Drop the file on
+**New effect**, type a name, and press **Send to device**.
+
+The eyes' own page also takes a compiled `.efx` file (made by `efxc build`); it is handled the same way.
 
 ## Command line
 
@@ -30,11 +37,7 @@ then `eyesctl anim love` (or the button) plays it.
 16 slots. Uploading under a name that exists replaces that effect; a 17th new name is refused with
 "all effect slots are used". Delete one first (`efxc delete <name>` or the Delete button).
 
-## Prompt for an assistant (copy and fill in the idea)
+## Prompt for an assistant
 
-> Write a JSON file for the eyes "efx" format described in `docs/efx-format.md`. Idea: *<describe it, e.g. "a pink
-> heart pops up over both eyes, beats twice, small hearts float up">*. Rules: duration 2000-4000 ms; coordinates are
-> pixels on a 240x240 round display (centre 120,118); use at most 10 shapes and 6 keys per shape; keys need strictly
-> increasing `t`; use `world: true` only for something travelling from one eye to the other (x 0..240 left eye,
-> 296..536 right eye); use size 0 to hide a shape. Give only the JSON. Then check it with
-> `efxc preview file.json` and fix anything that looks wrong.
+The ready-to-paste prompt, with the format inlined, is in [efx-prompt.md](efx-prompt.md). The full format is in
+[efx-format.md](efx-format.md).

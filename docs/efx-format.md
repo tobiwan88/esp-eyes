@@ -4,7 +4,11 @@ An `.efx` file is a small overlay animation (a heart, sparkles, a ball rolling f
 the eyes play on top of the normal eye. At most **4096 bytes**, **16 shapes**, **12 keys per shape**. The device keeps
 up to **16** of them; the file name becomes the animation name (`POST /api/eye {"play":"<name>"}`).
 
-People never write the binary by hand: write the JSON below and run `efxc build` (see `docs/custom-effects.md`).
+People never write the binary by hand: write the JSON below and upload it. The cat's page and Eyes Studio accept the
+JSON description directly, under any file name (a `.json` name is the convention; `.efx` also works), and convert it
+to the binary before sending. The device itself stores only the binary. `efxc build` does the same conversion on the
+command line (see `docs/custom-effects.md`). A file that is already binary is recognised by its first bytes `EFX1`,
+not by its name.
 The reference implementations are `tools/efx/compiler.py` (JSON to binary, validation) and
 `firmware/components/cat_eyes/src/cat_eyes_efx.c` (validation, playback). They must agree; `test_efx.py` and `test_efx.cpp`
 share the files in `examples/efx/`.
@@ -36,12 +40,13 @@ Size 0 hides a shape (use it to grow or shrink in).
 
 | Shape field | Values |
 |---|---|
+| `color` | colour for every key of this shape that has no `color` of its own (key-level `color` wins); default `white` |
 | `kind` | `circle` (size = radius), `ellipse` (+`ratio` = height/width), `rect` (size = half width, +`ratio`), `ring` (+`inner` 0..1), `heart` (size = half width), `sparkle` (4-point star), `glyph` (size = pixel scale; `glyph`: `0`-`9`, `%`, `euro`, `kana0`-`kana7`), `line` (size = half length, +`angle` degrees), `triangle` (size = radius, +`angle`) |
 | `eyes` | `both` (default), `left`, `right` |
 | `world` | `true`: x is a position across **both** displays (0..240 left eye, 296..536 right eye, gap 56), so a shape can fly from one eye into the other |
 | `easing` | `linear`, `smooth` (default), `in`, `out`, `back` (overshoot), `step` |
 | `loop` / `hold` | see above |
-| key `color` | `#rrggbb` or `red pink hotpink orange yellow green lime cyan blue purple white black gold gray brown` |
+| key `color` | `#rrggbb` or `red pink hotpink orange yellow green lime cyan blue purple white black gold gray brown`; overrides the shape `color` |
 | key `x`,`y` | -1000..1000; key `size` 0..400; key `t` ms, strictly increasing, below 65536 |
 
 `gaze` keys steer the eyes while the effect plays: `x`,`y` -1..1 (+y down), optional `pupil` 0..1 (omitted = normal)
@@ -74,7 +79,7 @@ count or value is out of range, or key times do not increase. A running effect i
 
 | Request | Effect |
 |---|---|
-| `PUT /api/efx/<name>` (body = the file) | store or replace; 507 when all 16 slots are used by other names |
+| `PUT /api/efx/<name>` (body = the binary `.efx`) | store or replace; 507 when all 16 slots are used by other names |
 | `GET /api/efx` | `{"effects":[{name,size,duration_ms,shapes}], "slots":16, "max_bytes":4096}` |
 | `DELETE /api/efx/<name>` | remove |
 | `POST /api/eye {"play":"<name>"}` | play it (404 `unknown animation` if it does not exist) |

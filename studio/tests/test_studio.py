@@ -123,3 +123,16 @@ def test_effect_upload_from_json_and_efx(tmp_path):
         bad = c.post("/api/efx/prepare", files={"file": ("x.json", json.dumps({"duration": 5}).encode())})
         assert bad.status_code == 422 and "shapes" in bad.text
         assert c.delete("/api/devices/eyes-mock/efx/love").status_code == 204
+
+
+def test_prepare_accepts_json_uploaded_as_efx(tmp_path):
+    from pathlib import Path
+
+    ex = Path(__file__).resolve().parents[2] / "examples" / "efx"
+    with MockDevice() as m:
+        c = client(tmp_path, m)
+        r = c.post("/api/efx/prepare", files={"file": ("x.efx", (ex / "love.json").read_bytes())})
+        assert r.status_code == 200, r.text
+        assert r.json()["shapes"] == 3
+        bad = c.post("/api/efx/prepare", files={"file": ("x.efx", b"\x00garbage")})
+        assert bad.status_code == 422 and "not an .efx file and not valid JSON" in bad.text

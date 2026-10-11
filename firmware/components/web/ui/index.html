@@ -37,6 +37,17 @@ button:active{border-color:var(--accent)}
 .hint{text-align:center;color:var(--muted);font-size:.85rem;margin:8px 0 0}
 #status{font-size:.9rem;color:var(--muted);min-height:1.4em}
 #err{color:var(--err);font-size:.9rem;min-height:1.4em;margin-top:6px}
+.intro{margin:0 0 10px;font-size:.92rem}
+.intro span{display:block}
+.estat{font-size:.9rem;min-height:1.4em;margin-top:8px;overflow-wrap:anywhere}
+.ok{color:#2e7d32}
+.bad{color:var(--err)}
+@media (prefers-color-scheme: dark){.ok{color:#6fcf7a}}
+.drop.over{outline:2px dashed var(--accent);outline-offset:4px}
+.efx-list{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.efx-list .row{align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.efx-list .row>span{overflow-wrap:anywhere}
+.efx-list .row>button{flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -94,17 +105,26 @@ button:active{border-color:var(--accent)}
   </div>
 </section>
 
-<section>
+<section id="efsec" class="drop">
   <h2>Custom effects <span class="muted" id="efree"></span></h2>
-  <div id="efxs"></div>
-  <label for="efile">Effect file (.efx)</label>
-  <input type="file" id="efile" accept=".efx">
+  <div class="intro">
+    <span>Pick the effect file (.json or .efx, any name works).</span>
+    <span>Check the name.</span>
+    <span>Press Upload and play.</span>
+  </div>
+  <label for="efile">Effect file</label>
+  <input type="file" id="efile" accept="*/*">
   <label for="ename">Name</label>
-  <input class="inp" id="ename" type="text" maxlength="31">
+  <input class="inp" id="ename" type="text" maxlength="31" autocomplete="off" autocapitalize="off">
+  <p class="hint" id="ehint" style="text-align:left"></p>
   <label class="check"><input type="checkbox" id="epool"> Also add to random pool</label>
   <div class="row more">
-    <button id="eup">Upload effect</button>
-    <span class="muted" id="eprog"></span>
+    <button id="eup" disabled>Upload and play</button>
+  </div>
+  <div class="estat" id="estat" role="status" aria-live="polite"></div>
+  <div class="efx-list">
+    <div id="efxs"></div>
+    <p class="hint" id="enone" hidden>No effects yet</p>
   </div>
   <p class="hint">An effect is a small overlay such as a heart. Its name becomes an animation button. Using a name that already exists replaces that effect.</p>
 </section>
@@ -136,6 +156,7 @@ button:active{border-color:var(--accent)}
 </main>
 
 <script src="/clip_encoder.js"></script>
+<script src="/efx_compile.js"></script>
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
@@ -146,7 +167,8 @@ button:active{border-color:var(--accent)}
     plist: $('plist'), pall: $('pall'), pnone: $('pnone'), phint: $('phint'),
     pmin: $('pmin'), pmax: $('pmax'), psave: $('psave'),
     clips: $('clips'), free: $('free'), stop: $('stop'),
-    efxs: $('efxs'), efree: $('efree'), efile: $('efile'), ename: $('ename'), epool: $('epool'), eup: $('eup'), eprog: $('eprog'),
+    efsec: $('efsec'), efxs: $('efxs'), efree: $('efree'), efile: $('efile'), ename: $('ename'), epool: $('epool'),
+    eup: $('eup'), estat: $('estat'), ehint: $('ehint'), enone: $('enone'),
     cfile: $('cfile'), cname: $('cname'), cup: $('cup'), cprog: $('cprog')
   };
   var meta = null;
@@ -323,7 +345,10 @@ button:active{border-color:var(--accent)}
   }
 
   function renderEffects(j) {
+    efxList = j.effects.map(function (e) { return e.name; });
+    efxSlots = j.slots;
     ui.efree.textContent = j.effects.length + ' of ' + j.slots + ' slots used';
+    ui.enone.hidden = j.effects.length > 0;
     ui.efxs.innerHTML = '';
     j.effects.forEach(function (e) {
       var row = document.createElement('div');
@@ -340,6 +365,110 @@ button:active{border-color:var(--accent)}
       });
       ui.efxs.appendChild(row);
     });
+    updateSlotHint();
+  }
+
+  // Custom effects section: every step reports in ui.estat, inside the section
+  var efxList = null, efxSlots = 16;
+  var chosen = null;        // { bytes, name, info, converted } for the file on screen
+  var chooseSeq = 0;        // ignores results of a file read that was overtaken
+  var nameTyped = false;    // the user typed a name since the last automatic fill
+
+  function setStat(msg, cls) {
+    ui.estat.className = 'estat' + (cls ? ' ' + cls : '');
+    ui.estat.textContent = msg || '';
+  }
+  function errText(e) { return e instanceof TypeError ? 'Network error' : ((e && e.message) || String(e)); }
+
+  function effectExists(n) { return !!efxList && efxList.indexOf(n) >= 0; }
+
+  function slotsFullFor(n) { return !!efxList && n !== '' && !effectExists(n) && efxList.length >= efxSlots; }
+
+  function updateSlotHint() {
+    var n = ui.ename.value.trim();
+    var msg = '';
+    if (slotsFullFor(n)) msg = 'All ' + efxSlots + ' slots used: choose an existing name to replace it or delete one';
+    else if (n && effectExists(n)) msg = 'This name replaces the existing effect "' + label(n) + '"';
+    ui.ehint.textContent = msg;
+    ui.ehint.className = slotsFullFor(n) ? 'hint bad' : 'hint';
+  }
+
+  function readBytes(f) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(new Uint8Array(r.result)); };
+      r.onerror = function () { reject(new Error('Could not read the file')); };
+      r.readAsArrayBuffer(f);
+    });
+  }
+
+  // Best-effort parse of a JSON file, only used to read its "name"
+  function jsonDoc(bytes) {
+    if (bytes.length >= 4 && bytes[0] === 0x45 && bytes[1] === 0x46 && bytes[2] === 0x58 && bytes[3] === 0x31) return null;
+    try { return JSON.parse(new TextDecoder('utf-8').decode(bytes).replace(/^﻿/, '')); } catch (e) { return null; }
+  }
+
+  function chooseEffect(f) {
+    var seq = ++chooseSeq;
+    chosen = null;
+    ui.eup.disabled = true;
+    setStat('', '');
+    if (!f) return;
+    setStat('Reading ' + f.name + '…', 'muted');
+    readBytes(f).then(function (bytes) {
+      if (seq !== chooseSeq) return;
+      var r = EfxCompile.fromBytes(bytes);
+      var doc = jsonDoc(bytes) || {};
+      var suggested = EfxCompile.suggestName(doc, f.name);
+      if (!nameTyped) ui.ename.value = suggested;
+      nameTyped = false;
+      chosen = { bytes: r.bytes, converted: r.converted, info: r.info };
+      var i = r.info || {};
+      var line = 'Ready: ' + (i.duration / 1000).toFixed(1) + ' s, ' + i.shapes + ' shapes';
+      if (r.converted) line += ' (converted from JSON)';
+      setStat(line, 'ok');
+      ui.eup.disabled = false;
+      updateSlotHint();
+    }).catch(function (e) {
+      if (seq !== chooseSeq) return;
+      setStat(errText(e), 'bad');
+      ui.eup.disabled = true;
+    });
+  }
+
+  function dropEffect(e) {
+    e.preventDefault();
+    ui.efsec.classList.remove('over');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    try { ui.efile.files = e.dataTransfer.files; } catch (err) { /* older browsers: the input keeps its old name */ }
+    chooseEffect(f);
+  }
+
+  function uploadEffect() {
+    var name = ui.ename.value.trim();
+    if (!chosen) { setStat('Choose an effect file first', 'bad'); return; }
+    if (!name) { setStat('Enter a name', 'bad'); return; }
+    if (!/^[a-z0-9_-]{1,31}$/i.test(name)) { setStat('Name: use letters, digits, _ or - (max 31)', 'bad'); return; }
+    if (slotsFullFor(name)) { setStat(ui.ehint.textContent, 'bad'); return; }
+    var blob = new Blob([chosen.bytes], { type: 'application/octet-stream' });
+    ui.eup.disabled = true;
+    setStat('Uploading…', 'muted');
+    api('PUT', '/api/efx/' + encodeURIComponent(name), blob).then(function () {
+      if (!ui.epool.checked) return null;
+      return api('GET', '/api/pool').then(function (p) {
+        var on = p.items.filter(function (i) { return i.enabled; }).map(function (i) { return i.name; });
+        if (on.indexOf(name) < 0) on.push(name);
+        return api('POST', '/api/pool', { enabled: on });
+      });
+    }).then(function () {
+      return api('POST', '/api/eye', { play: name });
+    }).then(function () {
+      setStat('Done, playing ' + name, 'ok');
+      return refresh();
+    }).then(reloadGrid).catch(function (e) {
+      setStat(errText(e), 'bad');
+    }).then(function () { ui.eup.disabled = !chosen; });
   }
 
   function reloadGrid() {
@@ -389,37 +518,23 @@ button:active{border-color:var(--accent)}
     var name = b.dataset.name;
     if (b.dataset.act === 'del') {
       if (!confirm('Delete effect ' + name + '?')) return;
-      api('DELETE', '/api/efx/' + encodeURIComponent(name)).then(refresh).then(reloadGrid).then(function () { setErr(''); }, fail);
+      setStat('Deleting\u2026', 'muted');
+      api('DELETE', '/api/efx/' + encodeURIComponent(name)).then(refresh).then(reloadGrid).then(function () {
+        setStat('Deleted ' + name, 'ok');
+      }).catch(function (err) { setStat(errText(err), 'bad'); });
     } else {
-      send({ play: name });
+      setStat('Playing ' + name + '\u2026', 'muted');
+      api('POST', '/api/eye', { play: name }).then(function () {
+        setStat('Playing ' + name, 'ok');
+      }).catch(function (err) { setStat(errText(err), 'bad'); });
     }
   };
-  ui.efile.onchange = function () {
-    var f = ui.efile.files[0];
-    if (f) ui.ename.value = defName(f);
-  };
-  ui.eup.onclick = function () {
-    var f = ui.efile.files[0], name = ui.ename.value.trim();
-    if (!f) { setErr('Choose an .efx file'); return; }
-    if (!name) { setErr('Enter a name'); return; }
-    ui.eup.disabled = true;
-    ui.eprog.textContent = 'Uploading\u2026';
-    setErr('');
-    api('PUT', '/api/efx/' + encodeURIComponent(name), f).then(function () {
-      if (!ui.epool.checked) return null;
-      return api('GET', '/api/pool').then(function (p) {
-        var on = p.items.filter(function (i) { return i.enabled; }).map(function (i) { return i.name; });
-        if (on.indexOf(name) < 0) on.push(name);
-        return api('POST', '/api/pool', { enabled: on });
-      });
-    }).then(function () {
-      ui.eprog.textContent = 'Done';
-      return refresh();
-    }).then(reloadGrid).then(function () { setErr(''); }, function (err) {
-      ui.eprog.textContent = '';
-      fail(err);
-    }).then(function () { ui.eup.disabled = false; });
-  };
+  ui.efile.onchange = function () { chooseEffect(ui.efile.files[0]); };
+  ui.ename.oninput = function () { nameTyped = true; updateSlotHint(); };
+  ui.eup.onclick = uploadEffect;
+  ui.efsec.ondragover = function (e) { e.preventDefault(); ui.efsec.classList.add('over'); };
+  ui.efsec.ondragleave = function (e) { if (!ui.efsec.contains(e.relatedTarget)) ui.efsec.classList.remove('over'); };
+  ui.efsec.ondrop = dropEffect;
   ui.stop.onclick = function () { api('POST', '/api/stop', {}).then(function () { setErr(''); }, fail); };
 
   ui.cfile.onchange = function () {
