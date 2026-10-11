@@ -67,6 +67,15 @@ class Device:
     def delete(self, name: str) -> None:
         self._req("DELETE", f"/api/clips/{name}")
 
+    def efx_list(self) -> dict[str, Any]:
+        return self._req("GET", "/api/efx").json()
+
+    def upload_efx(self, name: str, data: bytes) -> dict[str, Any]:
+        return self._req("PUT", f"/api/efx/{name}", data=data, timeout=30).json()
+
+    def delete_efx(self, name: str) -> None:
+        self._req("DELETE", f"/api/efx/{name}")
+
     def pool(self) -> dict[str, Any]:
         return self._req("GET", "/api/pool").json()
 

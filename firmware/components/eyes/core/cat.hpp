@@ -24,6 +24,12 @@ inline constexpr std::array<std::string_view, 31> kAnimNames = {
 // special animation name per style ("" = none)
 inline constexpr std::array<std::string_view, 7> kSpecialNames = {"", "", "", "sparkle", "heart_eyes", "demon_flare", "twinkle"};
 
+// Custom effects (.efx): the loader returns the validated file bytes for a name (empty span = unknown). The span
+// must stay valid until the next call that returns a non-empty span (the loader alternates two buffers, so an
+// effect that is still running is never overwritten by a failed load).
+using FxLoader = std::span<const std::uint8_t> (*)(std::string_view name) noexcept;
+void set_fx_loader(FxLoader) noexcept;
+
 struct CatInfo {
     std::uint8_t style, iris;
     bool auto_idle;
@@ -39,6 +45,7 @@ public:
     static CatInfo info() noexcept;
     static bool animating() noexcept;                  // a built-in animation is running
     static void play_anim(int id) noexcept;            // start a built-in animation (ignores unusable ids)
+    static bool play_custom(std::string_view name) noexcept;  // start a custom effect; false if unknown / no loader
     static bool style_has_special() noexcept;
     bool save_pending() const noexcept { return save_pending_; }
     void saved() noexcept { save_pending_ = false; }

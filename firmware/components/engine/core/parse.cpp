@@ -65,6 +65,7 @@ std::expected<EyeCmd, ParseError> parse_eye(std::string_view json) noexcept {
         if (n && std::string_view(n) == "blink") cmd.play = kPlayBlink;
         else if (n && std::string_view(n) == "random") cmd.play = kPlayRandom;
         else if (n && cat_eyes_anim_from_name(n) >= 0) cmd.play = static_cast<std::uint8_t>(cat_eyes_anim_from_name(n));
+        else if (n && clip_name_valid(n)) cmd.fx.assign(n);  // a custom effect; the web layer checks that it exists
         else c.bad("unknown animation");
     }
     cmd.auto_idle = get_bool(c, d.root, "auto");
@@ -88,7 +89,7 @@ std::expected<EyeCmd, ParseError> parse_eye(std::string_view json) noexcept {
         }
     }
     if (!c.err.empty()) return E(Err::BadJson, c.err);
-    if (!cmd.style && !cmd.iris && !cmd.play && !cmd.auto_idle && !cmd.look_q8) return E(Err::BadJson, "nothing to do");
+    if (!cmd.style && !cmd.iris && !cmd.play && cmd.fx.empty() && !cmd.auto_idle && !cmd.look_q8) return E(Err::BadJson, "nothing to do");
     return cmd;
 }
 

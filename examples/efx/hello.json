@@ -1,0 +1,21 @@
+{
+  "name": "hello",
+  "duration": 4000,
+  "shapes": [
+    {"kind": "circle", "world": true, "easing": "linear",
+     "keys": [
+       {"t": 0,    "x": -20, "y": 118, "size": 16, "color": "yellow"},
+       {"t": 3000, "x": 556, "y": 118, "size": 16, "color": "orange"}
+     ]},
+    {"kind": "ring", "inner": 0.7, "world": true, "easing": "linear",
+     "keys": [
+       {"t": 0,    "x": -20, "y": 118, "size": 24, "color": "white"},
+       {"t": 3000, "x": 556, "y": 118, "size": 24, "color": "white"}
+     ]},
+    {"kind": "glyph", "glyph": "7", "eyes": "left", "hold": true,
+     "keys": [
+       {"t": 3200, "x": 120, "y": 118, "size": 0, "color": "cyan"},
+       {"t": 3600, "x": 120, "y": 118, "size": 9, "color": "cyan"}
+     ]}
+  ]
+}

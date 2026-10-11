@@ -124,6 +124,10 @@ private:
             eyes::CatModel::play_anim(p.index);
             last_key_ = pick_key(p);
         } else if (p.kind == Pick::Kind::Clip) {
+            if (eyes::CatModel::play_custom(pool_.clips[static_cast<std::size_t>(p.index)].view())) {  // an .efx effect
+                last_key_ = pick_key(p);
+                return;
+            }
             PlayCmd c;
             c.clip[0] = c.clip[1] = pool_.clips[static_cast<std::size_t>(p.index)];
             c.then_eyes = true;

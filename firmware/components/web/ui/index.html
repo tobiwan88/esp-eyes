@@ -95,6 +95,21 @@ button:active{border-color:var(--accent)}
 </section>
 
 <section>
+  <h2>Custom effects <span class="muted" id="efree"></span></h2>
+  <div id="efxs"></div>
+  <label for="efile">Effect file (.efx)</label>
+  <input type="file" id="efile" accept=".efx">
+  <label for="ename">Name</label>
+  <input class="inp" id="ename" type="text" maxlength="31">
+  <label class="check"><input type="checkbox" id="epool"> Also add to random pool</label>
+  <div class="row more">
+    <button id="eup">Upload effect</button>
+    <span class="muted" id="eprog"></span>
+  </div>
+  <p class="hint">An effect is a small overlay such as a heart. Its name becomes an animation button. Using a name that already exists replaces that effect.</p>
+</section>
+
+<section>
   <h2>Clips <span class="muted" id="free"></span></h2>
   <div id="clips"></div>
   <div class="row more">
@@ -131,6 +146,7 @@ button:active{border-color:var(--accent)}
     plist: $('plist'), pall: $('pall'), pnone: $('pnone'), phint: $('phint'),
     pmin: $('pmin'), pmax: $('pmax'), psave: $('psave'),
     clips: $('clips'), free: $('free'), stop: $('stop'),
+    efxs: $('efxs'), efree: $('efree'), efile: $('efile'), ename: $('ename'), epool: $('epool'), eup: $('eup'), eprog: $('eprog'),
     cfile: $('cfile'), cname: $('cname'), cup: $('cup'), cprog: $('cprog')
   };
   var meta = null;
@@ -192,6 +208,12 @@ button:active{border-color:var(--accent)}
       if (a === 'special') ui.special = b;
       ui.anims.appendChild(b);
     });
+    (meta.custom || []).forEach(function (a) {
+      var b = document.createElement('button');
+      b.dataset.play = a;
+      b.textContent = '\u2605 ' + label(a);
+      ui.anims.appendChild(b);
+    });
     updateSpecial();
   }
 
@@ -231,10 +253,10 @@ button:active{border-color:var(--accent)}
       c.onchange = schedulePool;
       l.appendChild(c);
       l.appendChild(document.createTextNode(' ' + label(it.name)));
-      if (it.kind === 'clip') {
+      if (it.kind === 'clip' || it.kind === 'fx') {
         var t = document.createElement('span');
         t.className = 'tag';
-        t.textContent = 'clip';
+        t.textContent = it.kind === 'fx' ? 'effect' : 'clip';
         l.appendChild(t);
       }
       ui.plist.appendChild(l);
@@ -300,8 +322,33 @@ button:active{border-color:var(--accent)}
     api('POST', '/api/play', body).then(function () { setErr(''); }, fail);
   }
 
+  function renderEffects(j) {
+    ui.efree.textContent = j.effects.length + ' of ' + j.slots + ' slots used';
+    ui.efxs.innerHTML = '';
+    j.effects.forEach(function (e) {
+      var row = document.createElement('div');
+      row.className = 'row';
+      var n = document.createElement('span');
+      n.textContent = label(e.name) + ' (' + (e.duration_ms / 1000).toFixed(1) + ' s)';
+      row.appendChild(n);
+      [['play', 'Play'], ['del', 'Delete']].forEach(function (a) {
+        var b = document.createElement('button');
+        b.textContent = a[1];
+        b.dataset.act = a[0];
+        b.dataset.name = e.name;
+        row.appendChild(b);
+      });
+      ui.efxs.appendChild(row);
+    });
+  }
+
+  function reloadGrid() {
+    return fetch('/api/animations').then(function (r) { return r.json(); }).then(function (j) { meta = j; buildGrid(); });
+  }
+
   function refresh() {
     return Promise.all([
+      api('GET', '/api/efx').then(renderEffects),
       api('GET', '/api/clips').then(renderClips),
       api('GET', '/api/pool').then(renderPool)
     ]);
@@ -335,6 +382,43 @@ button:active{border-color:var(--accent)}
     } else {
       play(name, b.dataset.act === 'loop');
     }
+  };
+  ui.efxs.onclick = function (e) {
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if (!b) return;
+    var name = b.dataset.name;
+    if (b.dataset.act === 'del') {
+      if (!confirm('Delete effect ' + name + '?')) return;
+      api('DELETE', '/api/efx/' + encodeURIComponent(name)).then(refresh).then(reloadGrid).then(function () { setErr(''); }, fail);
+    } else {
+      send({ play: name });
+    }
+  };
+  ui.efile.onchange = function () {
+    var f = ui.efile.files[0];
+    if (f) ui.ename.value = defName(f);
+  };
+  ui.eup.onclick = function () {
+    var f = ui.efile.files[0], name = ui.ename.value.trim();
+    if (!f) { setErr('Choose an .efx file'); return; }
+    if (!name) { setErr('Enter a name'); return; }
+    ui.eup.disabled = true;
+    ui.eprog.textContent = 'Uploading\u2026';
+    setErr('');
+    api('PUT', '/api/efx/' + encodeURIComponent(name), f).then(function () {
+      if (!ui.epool.checked) return null;
+      return api('GET', '/api/pool').then(function (p) {
+        var on = p.items.filter(function (i) { return i.enabled; }).map(function (i) { return i.name; });
+        if (on.indexOf(name) < 0) on.push(name);
+        return api('POST', '/api/pool', { enabled: on });
+      });
+    }).then(function () {
+      ui.eprog.textContent = 'Done';
+      return refresh();
+    }).then(reloadGrid).then(function () { setErr(''); }, function (err) {
+      ui.eprog.textContent = '';
+      fail(err);
+    }).then(function () { ui.eup.disabled = false; });
   };
   ui.stop.onclick = function () { api('POST', '/api/stop', {}).then(function () { setErr(''); }, fail); };
 

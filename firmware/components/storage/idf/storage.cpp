@@ -10,10 +10,12 @@
 #include <cstdio>
 #include <cstring>
 
+#include "cat_eyes.h"
 #include "clip/core/clip.hpp"
 #include "config.hpp"
 #include "engine/core/command.hpp"
 #include "esp_littlefs.h"
+#include "eyes/core/cat.hpp"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,6 +25,7 @@ namespace {
 
 const char* const kTag = "storage";
 constexpr const char* kDir = "/fs/clips";
+constexpr const char* kEfxDir = "/fs/efx";
 std::array<engine::StaticString<31>, 2> g_playing;
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 std::atomic<bool> g_upload_active{false};
@@ -73,15 +76,18 @@ std::expected<void, engine::Err> init() noexcept {
     conf.dont_mount = false;
     if (esp_vfs_littlefs_register(&conf) != ESP_OK) return std::unexpected(engine::Err::Io);
     mkdir(kDir, 0775);
-    if (DIR* d = opendir(kDir)) {  // remove stale uploads
-        while (dirent* e = readdir(d)) {
-            if (std::strncmp(e->d_name, ".tmp-", 5) == 0) {
-                char p[320];
-                std::snprintf(p, sizeof p, "%s/%s", kDir, e->d_name);
-                unlink(p);
+    mkdir(kEfxDir, 0775);
+    for (const char* dir : {kDir, kEfxDir}) {
+        if (DIR* d = opendir(dir)) {  // remove stale uploads
+            while (dirent* e = readdir(d)) {
+                if (std::strncmp(e->d_name, ".tmp-", 5) == 0) {
+                    char p[320];
+                    std::snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+                    unlink(p);
+                }
             }
+            closedir(d);
         }
-        closedir(d);
     }
     ESP_LOGI(kTag, "mounted, free=%lu", static_cast<unsigned long>(free_bytes()));
     return {};
@@ -141,6 +147,102 @@ bool is_playing(std::string_view name) noexcept {
     for (const auto& n : g_playing) p |= (!n.empty() && n.view() == name);
     taskEXIT_CRITICAL(&g_mux);
     return p;
+}
+
+// ---- custom effects ----
+namespace {
+bool efx_path(std::string_view name, char* out, std::size_t cap, bool tmp = false) {
+    return engine::clip_name_valid(name) &&
+           std::snprintf(out, cap, "%s/%s%.*s.efx", kEfxDir, tmp ? ".tmp-" : "", static_cast<int>(name.size()), name.data()) <
+               static_cast<int>(cap);
+}
+
+std::expected<std::size_t, engine::Err> read_file(const char* path, std::span<std::uint8_t> out) {
+    const int fd = open(path, O_RDONLY);
+    if (fd < 0) return std::unexpected(engine::Err::NotFound);
+    const ssize_t n = read(fd, out.data(), out.size());
+    struct stat st;
+    const bool whole = fstat(fd, &st) == 0 && st.st_size == n;
+    close(fd);
+    if (n <= 0 || !whole) return std::unexpected(engine::Err::Io);
+    return static_cast<std::size_t>(n);
+}
+
+std::expected<EfxInfo, engine::Err> efx_info_of(std::string_view name, std::span<const std::uint8_t> d) {
+    EfxInfo i{};
+    i.name.assign(name);
+    i.size = static_cast<std::uint32_t>(d.size());
+    i.duration_ms = static_cast<std::uint16_t>(d[6] | (d[7] << 8));
+    i.shapes = d[8];
+    return i;
+}
+}  // namespace
+
+bool efx_exists(std::string_view name) noexcept {
+    char p[96];
+    struct stat st;
+    return efx_path(name, p, sizeof p) && stat(p, &st) == 0;
+}
+
+std::expected<std::vector<EfxInfo>, engine::Err> efx_list() noexcept {
+    std::vector<EfxInfo> out;
+    DIR* d = opendir(kEfxDir);
+    if (!d) return std::unexpected(engine::Err::Io);
+    std::array<std::uint8_t, 16> hdr;
+    while (dirent* e = readdir(d)) {
+        std::string_view n = e->d_name;
+        if (n.size() < 5 || n.substr(n.size() - 4) != ".efx" || n[0] == '.' || out.size() >= static_cast<std::size_t>(kMaxEfx)) continue;
+        const std::string_view base = n.substr(0, n.size() - 4);
+        char p[96];
+        if (!efx_path(base, p, sizeof p)) continue;
+        struct stat st;
+        const int fd = open(p, O_RDONLY);
+        if (fd < 0) continue;
+        const bool ok = read(fd, hdr.data(), hdr.size()) == static_cast<ssize_t>(hdr.size()) && fstat(fd, &st) == 0;
+        close(fd);
+        if (!ok) continue;
+        auto i = efx_info_of(base, hdr);
+        i->size = static_cast<std::uint32_t>(st.st_size);
+        out.push_back(*i);
+    }
+    closedir(d);
+    return out;
+}
+
+std::expected<EfxInfo, engine::Err> efx_put(std::string_view name, std::span<const std::uint8_t> data) noexcept {
+    if (!engine::clip_name_valid(name)) return std::unexpected(engine::Err::BadName);
+    for (const auto a : eyes::kAnimNames)
+        if (a == name) return std::unexpected(engine::Err::BadName);
+    if (name == "blink" || name == "random" || name == "idle") return std::unexpected(engine::Err::BadName);
+    if (data.empty() || data.size() > kMaxEfxBytes) return std::unexpected(engine::Err::TooLarge);
+    if (cat_eyes_efx_check(data.data(), data.size()) != 0) return std::unexpected(engine::Err::BadClip);
+    if (info(name)) return std::unexpected(engine::Err::Conflict);  // a clip already uses this name
+    if (!efx_exists(name)) {
+        auto l = efx_list();
+        if (!l) return std::unexpected(l.error());
+        if (l->size() >= static_cast<std::size_t>(kMaxEfx)) return std::unexpected(engine::Err::NoSpace);
+    }
+    char tp[96], fp[96];
+    if (!efx_path(name, tp, sizeof tp, true) || !efx_path(name, fp, sizeof fp)) return std::unexpected(engine::Err::BadName);
+    const int fd = open(tp, O_WRONLY | O_CREAT | O_TRUNC, 0664);
+    if (fd < 0) return std::unexpected(engine::Err::Io);
+    const bool wrote = ::write(fd, data.data(), data.size()) == static_cast<ssize_t>(data.size());
+    close(fd);
+    if (!wrote) { unlink(tp); return std::unexpected(engine::Err::NoSpace); }
+    if (rename(tp, fp) != 0) { unlink(tp); return std::unexpected(engine::Err::Io); }
+    return efx_info_of(name, data);
+}
+
+std::expected<void, engine::Err> efx_remove(std::string_view name) noexcept {
+    char p[96];
+    if (!efx_path(name, p, sizeof p)) return std::unexpected(engine::Err::BadName);
+    return unlink(p) == 0 ? std::expected<void, engine::Err>{} : std::unexpected(engine::Err::NotFound);
+}
+
+std::expected<std::size_t, engine::Err> efx_read(std::string_view name, std::span<std::uint8_t> out) noexcept {
+    char p[96];
+    if (!efx_path(name, p, sizeof p)) return std::unexpected(engine::Err::BadName);
+    return read_file(p, out);
 }
 
 // ---- Upload ----

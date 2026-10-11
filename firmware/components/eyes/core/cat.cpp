@@ -4,7 +4,18 @@
 
 namespace eyes {
 namespace {
+FxLoader g_fx_loader = nullptr;
 bool g_auto = true;  // random idle on/off; the animation choice is made by engine::Scene, not by cat_eyes
+}
+
+void set_fx_loader(FxLoader l) noexcept { g_fx_loader = l; }
+
+bool CatModel::play_custom(std::string_view name) noexcept {
+    if (!g_fx_loader || !engine::clip_name_valid(name)) return false;
+    const auto bytes = g_fx_loader(name);
+    if (bytes.empty()) return false;
+    const engine::StaticString<31> z(name);  // NUL-terminated copy for the C API
+    return cat_eyes_efx_play(z.c_str(), bytes.data(), bytes.size());
 }
 
 void CatModel::start(std::uint32_t seed, std::uint8_t style, std::uint8_t iris, bool auto_idle) noexcept {
@@ -33,6 +44,7 @@ void CatModel::apply(const engine::EyeCmd& c, std::uint32_t) noexcept {
             cat_eyes_play(static_cast<cat_anim_t>(*c.play));
         }
     }
+    if (!c.fx.empty()) play_custom(c.fx.view());
     if (c.look_q8) cat_eyes_look((*c.look_q8)[0] / 256.f, (*c.look_q8)[1] / 256.f, c.hold_ms);
     if (c.save) save_pending_ = true;
 }

@@ -1,21 +1,24 @@
 """eyes-studio: prepare clips, preview, upload, control devices (plan §3.8)."""
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from clipprep.preview import preview_gif
+from clipprep.writer import encode
+from efx import EfxError, compile_efx, render_gif
+from efx import check as efx_check
+from eyes_client import DeviceError
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from clipprep import Budget, prepare
-from clipprep.preview import preview_gif
-from clipprep.writer import encode
-from eyes_client import DeviceError
 
 from .devices import Registry
 
@@ -120,7 +123,7 @@ def create_app(registry: Registry | None = None, work_dir: Path | None = None, m
         try:
             reg_t = tuple(int(v) for v in region.split(",")) if region else "full"
             p = prepare(src, eye_region=reg_t, fps=fps, max_frames=max_frames, fit=fit, bg=bg, loop=loop, budget=budget)
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:
             raise HTTPException(422, f"cannot prepare: {ex}") from ex
         finally:
             src.unlink(missing_ok=True)
@@ -142,6 +145,50 @@ def create_app(registry: Registry | None = None, work_dir: Path | None = None, m
         if not f.exists():
             raise HTTPException(404, "prepared clip not found")
         return dev(id_).upload(name, f)
+
+    # ---- custom effects (.efx): a .json description or a ready .efx file ----
+    @app.post("/api/efx/prepare")
+    def prepare_efx(file: UploadFile = File(...)):
+        raw = file.file.read(1_000_000)
+        try:
+            if raw[:4] == b"EFX1":
+                data = raw
+            else:
+                try:
+                    data = compile_efx(json.loads(raw))
+                except json.JSONDecodeError as ex:
+                    raise EfxError(f"not valid JSON: {ex}") from ex
+            info = efx_check(data)
+        except EfxError as ex:
+            raise HTTPException(422, str(ex)) from ex
+        pid = uuid.uuid4().hex[:12]
+        (work / f"{pid}.efx").write_bytes(data)
+        render_gif(data, work / f"{pid}.efx.gif")
+        return {"id": pid, "size": len(data), "duration_ms": info["duration"], "shapes": info["shapes"],
+                "preview": f"/api/prepared/{pid}/efx_preview.gif"}
+
+    @app.get("/api/prepared/{pid}/efx_preview.gif")
+    def efx_preview(pid: str):
+        f = work / f"{Path(pid).name}.efx.gif"
+        if not f.exists():
+            raise HTTPException(404)
+        return FileResponse(f, media_type="image/gif")
+
+    @app.get("/api/devices/{id_}/efx")
+    def efx_list(id_: str):
+        return dev(id_).efx_list()
+
+    @app.post("/api/devices/{id_}/efx/{name}")
+    def efx_send(id_: str, name: str, body: Send):
+        f = work / f"{Path(body.prepared).name}.efx"
+        if not f.exists():
+            raise HTTPException(404, "prepared effect not found")
+        return dev(id_).upload_efx(name, f.read_bytes())
+
+    @app.delete("/api/devices/{id_}/efx/{name}")
+    def efx_delete(id_: str, name: str):
+        dev(id_).delete_efx(name)
+        return Response(status_code=204)
 
     @app.get("/")
     def index():

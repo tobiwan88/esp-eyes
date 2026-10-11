@@ -29,7 +29,9 @@ TEST_CASE("parse_eye rejects bad input") {
     BAD(parse_eye(R"({"mood":"happy"})"), Err::BadJson);
     BAD(parse_eye(R"({"style":"neon"})"), Err::BadJson);
     BAD(parse_eye(R"({"iris":3})"), Err::BadJson);
-    BAD(parse_eye(R"({"play":"dance"})"), Err::BadJson);
+    BAD(parse_eye(R"({"play":"Dance!"})"), Err::BadJson);
+    auto fx = parse_eye(R"({"play":"dance"})");  // not built in: a custom effect, checked by the web layer
+    OK(fx); if (fx) { CHECK(!fx->play); CHECK(fx->fx.view() == "dance"); }
     BAD(parse_eye(R"({"auto":"yes"})"), Err::BadJson);
     BAD(parse_eye(R"({"look":[1]})"), Err::BadJson);
     BAD(parse_eye(R"({"look":[2,0]})"), Err::BadJson);

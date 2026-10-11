@@ -8,10 +8,12 @@
 #include "config.hpp"
 #include "display/idf/display.hpp"
 #include "engine/core/scene.hpp"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "settings/idf/settings.hpp"
+#include "storage/idf/storage.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -42,6 +44,23 @@ struct LcdReq { bool pending = false; LcdOp op = LcdOp::Swap; int arg = 0; };
 portMUX_TYPE g_lcd_mux = portMUX_INITIALIZER_UNLOCKED;
 LcdReq g_lcd_req{};
 std::uint32_t g_test_until = 0;  // render task only; 0 = no test pattern
+
+// Custom effects: two buffers, read the file into the idle one and hand it to cat_eyes only if it loaded, so the
+// effect that is running (it points into the other buffer) is never overwritten.
+std::span<const std::uint8_t> load_fx(std::string_view name) noexcept {
+    static std::uint8_t* bufs[2] = {nullptr, nullptr};
+    static int cur = 1;
+    const int next = 1 - cur;
+    if (!bufs[next]) {
+        bufs[next] = static_cast<std::uint8_t*>(heap_caps_malloc(storage::kMaxEfxBytes, MALLOC_CAP_SPIRAM));
+        if (!bufs[next]) bufs[next] = static_cast<std::uint8_t*>(heap_caps_malloc(storage::kMaxEfxBytes, MALLOC_CAP_DEFAULT));
+        if (!bufs[next]) return {};
+    }
+    auto n = storage::efx_read(name, {bufs[next], storage::kMaxEfxBytes});
+    if (!n) return {};
+    cur = next;
+    return {bufs[next], *n};
+}
 
 std::uint32_t now_ms() { return static_cast<std::uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -104,6 +123,7 @@ Pool load_pool() {  // saved pool (NVS) on top of the default pool
 
 void task(void*) {
     esp_task_wdt_add(nullptr);
+    eyes::set_fx_loader(&load_fx);
     auto num = [](const char* k, int d) { auto v = settings::get(k); return v ? std::atoi(v->c_str()) : d; };
     Scene<clip::ClipPlayer> scene(esp_timer_get_time() & 0xFFFFFFFF, static_cast<std::uint8_t>(num("style", 0)),
                                   static_cast<std::uint8_t>(num("iris", 0)), num("auto", 1) != 0);

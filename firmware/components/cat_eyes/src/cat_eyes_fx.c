@@ -938,6 +938,7 @@ static const uint16_t k_dur[CAT_ANIM_FX_LAST - CAT_ANIM_FX_FIRST + 1] = {
 
 uint16_t ce_fx_duration(cat_anim_t id)
 {
+    if (id == CE_ANIM_EFX) return ce_efx_duration();
     return (id >= CAT_ANIM_FX_FIRST && id <= CAT_ANIM_FX_LAST) ? k_dur[id - CAT_ANIM_FX_FIRST] : 1;
 }
 
@@ -951,14 +952,18 @@ void ce_fx_begin(cat_anim_t id)
 
 void ce_fx_params(cat_anim_t id, int eye, float t, float *p)
 {
-    if (id < CAT_ANIM_FX_FIRST || id > CAT_ANIM_FX_LAST || (unsigned)eye > 1) return;
+    if ((unsigned)eye > 1) return;
+    if (id == CE_ANIM_EFX) { ce_efx_params(t, p); return; }
+    if (id < CAT_ANIM_FX_FIRST || id > CAT_ANIM_FX_LAST) return;
     k_fx[id - CAT_ANIM_FX_FIRST](eye, t, p, NULL);
 }
 
 void ce_fx_draw(cat_anim_t id, int eye, float t, ce_frame_t *f)
 {
-    if (id < CAT_ANIM_FX_FIRST || id > CAT_ANIM_FX_LAST || (unsigned)eye > 1) return;
-    k_fx[id - CAT_ANIM_FX_FIRST](eye, t, NULL, f);
+    if ((unsigned)eye > 1) return;
+    if (id == CE_ANIM_EFX) ce_efx_draw(eye, t, f);
+    else if (id >= CAT_ANIM_FX_FIRST && id <= CAT_ANIM_FX_LAST) k_fx[id - CAT_ANIM_FX_FIRST](eye, t, NULL, f);
+    else return;
     /* rows touched by the shapes, for the dirty-row logic */
     int lo = CAT_EYES_H, hi = 0;
     for (int i = 0; i < f->n_fx; i++) {
