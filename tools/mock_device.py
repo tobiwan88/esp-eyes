@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from efx import EfxError
+from efx import check as efx_check
+
 TOKEN = "testtoken"
+EFX_SLOTS = 16
 
 STYLES = ["realistic", "flat", "line", "anime", "cute", "halloween", "christmas"]
 IRISES = ["amber", "green", "blue", "copper", "violet", "odd"]
@@ -41,7 +46,7 @@ def validate_pool(body, known: set[str]) -> str | None:
     return None
 
 
-def validate_eye(body) -> str | None:
+def validate_eye(body, extra_play=()) -> str | None:
     """Return an error message for an invalid POST /api/eye body, or None if it is valid."""
     if not isinstance(body, dict):
         return "body must be a JSON object"
@@ -52,7 +57,7 @@ def validate_eye(body) -> str | None:
         return f"unknown style {body['style']!r}"
     if "iris" in body and body["iris"] not in IRISES:
         return f"unknown iris {body['iris']!r}"
-    if "play" in body and body["play"] not in PLAY_NAMES:
+    if "play" in body and body["play"] not in PLAY_NAMES and body["play"] not in (extra_play or ()):
         return f"unknown animation {body['play']!r}"
     if "auto" in body and not isinstance(body["auto"], bool):
         return "auto must be a boolean"
@@ -72,6 +77,7 @@ def validate_eye(body) -> str | None:
 class MockDevice:
     def __init__(self):
         self.clips: dict[str, bytes] = {}
+        self.efx: dict[str, bytes] = {}
         self.eye_cmds: list[dict] = []
         self.play_cmds: list[dict] = []
         self.eye_state = {"style": "realistic", "iris": "amber", "auto": False, "anim": None}
@@ -113,7 +119,7 @@ class MockDevice:
                                             "eye": dict(mock.eye_state)})
                 if self.path == "/api/animations":
                     return self._send(200, {"styles": STYLES, "irises": IRISES, "animations": ANIMATIONS,
-                                            "specials": SPECIALS, "state": dict(mock.eye_state)})
+                                            "specials": SPECIALS, "custom": list(mock.efx), "state": dict(mock.eye_state)})
                 if not self._auth():
                     return
                 if self.path == "/api/clips":
@@ -121,6 +127,10 @@ class MockDevice:
                                             "free": 3000000})
                 if self.path == "/api/pool":
                     return self._send(200, mock.pool_body())
+                if self.path == "/api/efx":
+                    return self._send(200, {"effects": [{"name": n, "size": len(d), "duration_ms": int.from_bytes(d[6:8], "little"),
+                                                         "shapes": d[8]} for n, d in mock.efx.items()],
+                                            "slots": EFX_SLOTS, "max_bytes": 4096})
                 self._err(404, "E_NOT_FOUND", "no route")
 
             def do_POST(self):
@@ -132,7 +142,7 @@ class MockDevice:
                         cmd = json.loads(body)
                     except ValueError:
                         return self._err(400, "E_BAD_JSON", "body is not valid JSON")
-                    problem = validate_eye(cmd)
+                    problem = validate_eye(cmd, tuple(mock.efx))
                     if problem:
                         return self._err(400, "E_BAD_JSON", problem)
                     mock.eye_cmds.append(cmd)
@@ -168,6 +178,19 @@ class MockDevice:
                     return
                 body = self._body()
                 name = self.path.rsplit("/", 1)[-1]
+                if self.path.startswith("/api/efx/"):
+                    if not re.fullmatch(r"[a-z0-9_-]{1,31}", name) or name in PLAY_NAMES or name in mock.clips:
+                        return self._err(400, "E_BAD_NAME", "name must match ^[a-z0-9_-]{1,31}$ and not be built in")
+                    if len(body) > 4096:
+                        return self._err(413, "E_TOO_LARGE", "effect file over 4096 bytes")
+                    try:
+                        info = efx_check(body)
+                    except EfxError as e:
+                        return self._err(422, "E_BAD_CLIP", str(e))
+                    if name not in mock.efx and len(mock.efx) >= EFX_SLOTS:
+                        return self._err(507, "E_NO_SPACE", "all effect slots are used: delete one, or reuse a name to replace it")
+                    mock.efx[name] = body
+                    return self._send(201, {"name": name, "size": len(body), "duration_ms": info["duration"], "shapes": info["shapes"]})
                 if body[:4] != b"EYCL":
                     return self._err(422, "E_BAD_CLIP", "invalid clip")
                 mock.clips[name] = body
@@ -177,6 +200,11 @@ class MockDevice:
                 if not self._auth():
                     return
                 name = self.path.rsplit("/", 1)[-1]
+                if self.path.startswith("/api/efx/"):
+                    if mock.efx.pop(name, None) is None:
+                        return self._err(404, "E_NOT_FOUND", "no such effect")
+                    mock.pool_enabled.discard(name)
+                    return self._send(204)
                 if mock.clips.pop(name, None) is None:
                     return self._err(404, "E_NOT_FOUND", "no such clip")
                 mock.pool_enabled.discard(name)
@@ -186,11 +214,12 @@ class MockDevice:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     def pool_names(self) -> list[str]:
-        return ANIMATIONS + list(self.clips)
+        return ANIMATIONS + list(self.clips) + list(self.efx)
 
     def pool_body(self) -> dict:
         items = [{"name": n, "kind": "anim", "enabled": n in self.pool_enabled} for n in ANIMATIONS]
         items += [{"name": n, "kind": "clip", "enabled": n in self.pool_enabled} for n in self.clips]
+        items += [{"name": n, "kind": "fx", "enabled": n in self.pool_enabled} for n in self.efx]
         return {"items": items, "interval": list(self.pool_interval), "auto": True}
 
     @property

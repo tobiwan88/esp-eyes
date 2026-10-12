@@ -23,8 +23,8 @@
   label { display:grid; gap:4px; font-size:13px; color:var(--mute); } label.inline { display:flex; align-items:center; gap:6px; }
   table { width:100%; border-collapse:collapse; } td { padding:6px 4px; border-top:1px solid var(--line); }
   img.preview { width:160px; height:160px; border-radius:50%; background:#000; }
-  #drop { border:2px dashed var(--line); border-radius:12px; padding:18px; text-align:center; color:var(--mute); }
-  #drop.over { border-color:var(--accent); }
+  #drop, #edrop { border:2px dashed var(--line); border-radius:12px; padding:18px; text-align:center; color:var(--mute); }
+  #drop.over, #edrop.over { border-color:var(--accent); }
   #anims button.special { border-color:var(--accent); }
 </style>
 </head>
@@ -73,6 +73,14 @@
   </section>
 
   <section class="card">
+    <h2>New effect (overlay such as a heart)</h2>
+    <div id="edrop">Drop an effect file (<code>.efx</code> or <code>.json</code>) here, or <label style="display:inline"><input type="file" id="efile" accept=".efx,.json" hidden><u style="cursor:pointer">browse</u></label></div>
+    <div id="eprep" class="row" style="margin-top:12px"></div>
+    <h2 style="margin-top:14px">Effects on device</h2>
+    <table id="efxs"></table>
+  </section>
+
+  <section class="card">
     <h2>Clips on device</h2>
     <table id="clips"></table>
     <div class="row" style="margin-top:10px"><button id="stop">Stop clips</button><span id="msg" class="mute"></span></div>
@@ -100,7 +108,7 @@ async function loadDevices() {
   if (cur) sel.value = cur;
   const d = list.find(x => x.id === sel.value);
   $("#devinfo").textContent = !d ? "no devices found" : d.error ? d.error : `${d.status.fps} fps · ${d.status.ip} · ${d.status.rssi} dBm · ${Math.round(d.status.fs_free/1024)} KB free`;
-  if (d && !d.error) loadClips();
+  if (d && !d.error) { loadClips(); loadEffects(); }
 }
 // animation list, styles and irises come from the device; called once per device selection
 async function loadAnimations() {
@@ -111,7 +119,8 @@ async function loadAnimations() {
     $("#style").innerHTML = a.styles.map(s => `<option>${s}</option>`).join("");
     $("#iris").innerHTML = a.irises.map(s => `<option>${s}</option>`).join("");
     // "blink" has its own button above, so it is left out of the grid
-    $("#anims").innerHTML = a.animations.filter(n => n !== "blink").map(n => `<button data-anim="${n}">${n}</button>`).join("");
+    $("#anims").innerHTML = a.animations.filter(n => n !== "blink").map(n => `<button data-anim="${n}">${n}</button>`).join("")
+      + (a.custom || []).map(n => `<button data-anim="${n}" title="custom effect">★ ${n}</button>`).join("");
     $("#style").value = a.state.style; $("#iris").value = a.state.iris; $("#auto").checked = !!a.state.auto;
     renderSpecial();
   } catch (e) { say(e.message, true); }
@@ -130,11 +139,22 @@ async function loadClips() {
       : `<tr><td class="mute">No clips yet.</td></tr>`;
   } catch (e) { say(e.message, true); }
 }
+async function loadEffects() {
+  if (!dev()) return;
+  try {
+    const { effects, slots } = await api(`/api/devices/${dev()}/efx`);
+    $("#efxs").innerHTML = effects.length ? effects.map(c => `<tr><td><b>${c.name}</b></td><td class="mute">${(c.duration_ms/1000).toFixed(1)} s · ${c.shapes} shapes · ${c.size} B</td>
+      <td class="row"><button data-anim="${c.name}">Play</button><button data-edel="${c.name}">Delete</button></td></tr>`).join("")
+      + `<tr><td class="mute" colspan="3">${effects.length} of ${slots} slots used. Sending under an existing name replaces it.</td></tr>`
+      : `<tr><td class="mute">No custom effects yet (${slots} slots free).</td></tr>`;
+  } catch (e) { say(e.message, true); }
+}
 document.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.anim) eye({ play: b.dataset.anim });
   if (b.dataset.play) api(`/api/devices/${dev()}/play`, { method:"POST", body:{ clip:b.dataset.play } }).catch(x => say(x.message, true));
   if (b.dataset.loop) api(`/api/devices/${dev()}/play`, { method:"POST", body:{ clip:b.dataset.loop, loop:true } }).catch(x => say(x.message, true));
+  if (b.dataset.edel && confirm(`Delete effect ${b.dataset.edel}?`)) { await api(`/api/devices/${dev()}/efx/${b.dataset.edel}`, { method:"DELETE" }).catch(x => say(x.message, true)); loadEffects(); loadAnimations(); }
   if (b.dataset.del && confirm(`Delete ${b.dataset.del}?`)) { await api(`/api/devices/${dev()}/clips/${b.dataset.del}`, { method:"DELETE" }).catch(x => say(x.message, true)); loadClips(); }
 });
 $("#stop").onclick = () => api(`/api/devices/${dev()}/stop`, { method:"POST" }).catch(e => say(e.message, true));
@@ -174,6 +194,27 @@ $("#prepare").onclick = async () => {
     };
   } catch (e) { $("#prep").innerHTML = `<span class="err">${e.message}</span>`; }
 };
+// effect upload: the file is checked and previewed first, then sent under a name
+const edrop = $("#edrop");
+async function prepareEffect(f) {
+  if (!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  $("#eprep").textContent = "Checking…";
+  try {
+    const p = await api("/api/efx/prepare", { method:"POST", body: fd });
+    const nm = (f.name.split(".")[0] || "effect").toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 31);
+    $("#eprep").innerHTML = `<img class="preview" src="${p.preview}" alt="preview"><div style="display:grid;gap:6px">
+      <div>${(p.duration_ms/1000).toFixed(1)} s · ${p.shapes} shapes · ${p.size} bytes</div>
+      <div class="row"><input id="ename" placeholder="effect name" size="14" value="${nm}"><button class="primary" id="esend">Send to device</button></div></div>`;
+    $("#esend").onclick = async () => {
+      try { await api(`/api/devices/${dev()}/efx/${$("#ename").value}`, { method:"POST", body:{ prepared: p.id } }); say(`effect ${$("#ename").value} is ready`); loadEffects(); loadAnimations(); }
+      catch (x) { say(x.message, true); }
+    };
+  } catch (x) { $("#eprep").innerHTML = `<span class="err">${x.message}</span>`; }
+}
+edrop.ondragover = e => { e.preventDefault(); edrop.classList.add("over"); }; edrop.ondragleave = () => edrop.classList.remove("over");
+edrop.ondrop = e => { e.preventDefault(); edrop.classList.remove("over"); prepareEffect(e.dataTransfer.files[0]); };
+$("#efile").onchange = e => prepareEffect(e.target.files[0]);
 $("#device").onchange = () => { loadDevices(); loadAnimations(); };
 loadDevices().then(loadAnimations); setInterval(loadDevices, 15000);
 </script>

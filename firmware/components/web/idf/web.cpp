@@ -13,6 +13,7 @@
 #include "engine/core/pool.hpp"
 #include "eyes/core/cat.hpp"
 #include "engine/idf/render_task.hpp"
+#include "cat_eyes.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
@@ -80,6 +81,7 @@ esp_err_t post_eye(httpd_req_t* r) {
     if (!read_body(r, buf, body)) return ESP_OK;
     auto cmd = engine::parse_eye(body);
     if (!cmd) { send_error(r, cmd.error().code, cmd.error().message.view()); return ESP_OK; }
+    if (!cmd->fx.empty() && !storage::efx_exists(cmd->fx.view())) { send_error(r, engine::Err::NotFound, "unknown animation"); return ESP_OK; }
     if (!engine::post(engine::Command{*cmd}, 50)) { send_error(r, engine::Err::Busy, "command queue full"); return ESP_OK; }
     send_json(r, "202 Accepted", R"({"queued":true})");
     return ESP_OK;
@@ -155,6 +157,13 @@ std::string pool_body(const engine::Pool& p) {
             item(c.name.view(), "clip", on);
         }
     }
+    if (auto l = storage::efx_list()) {
+        for (const auto& c : *l) {
+            bool on = false;
+            for (const auto& n : p.clips) on |= (n.view() == c.name.view());
+            item(c.name.view(), "fx", on);
+        }
+    }
     char t[96];
     std::snprintf(t, sizeof t, "],\"interval\":[%.1f,%.1f],\"auto\":%s}", p.min_ds / 10.0, p.max_ds / 10.0,
                   engine::eye_info().auto_idle ? "true" : "false");
@@ -175,7 +184,7 @@ esp_err_t post_pool(httpd_req_t* r) {
     auto patch = engine::parse_pool(body);
     if (!patch) { send_error(r, patch.error().code, patch.error().message.view()); return ESP_OK; }
     for (const auto& c : patch->clips) {  // every named clip must exist on the device
-        if (!storage::info(c.view())) {
+        if (!storage::info(c.view()) && !storage::efx_exists(c.view())) {
             std::string m = "unknown item: ";
             m.append(c.view());
             send_error(r, engine::Err::BadJson, m);
@@ -250,6 +259,78 @@ esp_err_t delete_clip(httpd_req_t* r) {
     return ESP_OK;
 }
 
+// ---- custom effects: GET /api/efx, PUT/DELETE /api/efx/<name> ----
+std::string_view efx_uri_name(httpd_req_t* r) {
+    std::string_view u = r->uri;
+    if (auto q = u.find('?'); q != std::string_view::npos) u = u.substr(0, q);
+    constexpr std::string_view p = "/api/efx/";
+    return u.size() > p.size() ? u.substr(p.size()) : std::string_view{};
+}
+
+esp_err_t get_efx(httpd_req_t* r) {
+    if (!authorized(r)) return ESP_OK;
+    auto l = storage::efx_list();
+    if (!l) { send_error(r, l.error(), "list failed"); return ESP_OK; }
+    std::string b = R"({"effects":[)";
+    bool first = true;
+    for (const auto& e : *l) {
+        char s[128];
+        std::snprintf(s, sizeof s, R"(%s{"name":"%.31s","size":%lu,"duration_ms":%u,"shapes":%u})", first ? "" : ",", e.name.c_str(),
+                      static_cast<unsigned long>(e.size), e.duration_ms, e.shapes);
+        b += s;
+        first = false;
+    }
+    char t[64];
+    std::snprintf(t, sizeof t, R"(],"slots":%d,"max_bytes":%u})", storage::kMaxEfx, static_cast<unsigned>(storage::kMaxEfxBytes));
+    b += t;
+    send_json(r, "200 OK", b.c_str());
+    return ESP_OK;
+}
+
+esp_err_t put_efx(httpd_req_t* r) {
+    if (!authorized(r)) return ESP_OK;
+    const std::string_view name = efx_uri_name(r);
+    if (!engine::clip_name_valid(name)) { send_error(r, engine::Err::BadName, "name must match ^[a-z0-9_-]{1,31}$"); return ESP_OK; }
+    if (r->content_len == 0) { send_error(r, engine::Err::LengthRequired, "Content-Length required"); return ESP_OK; }
+    if (r->content_len > storage::kMaxEfxBytes) { send_error(r, engine::Err::TooLarge, "effect file over 4096 bytes"); return ESP_OK; }
+    auto* buf = static_cast<std::uint8_t*>(heap_caps_malloc(storage::kMaxEfxBytes, MALLOC_CAP_SPIRAM));
+    if (!buf) buf = static_cast<std::uint8_t*>(heap_caps_malloc(storage::kMaxEfxBytes, MALLOC_CAP_DEFAULT));
+    if (!buf) { send_error(r, engine::Err::Io, "no memory"); return ESP_OK; }
+    struct Free { void* p; ~Free() { heap_caps_free(p); } } guard{buf};
+    std::size_t got = 0;
+    while (got < r->content_len) {
+        const int n = httpd_req_recv(r, reinterpret_cast<char*>(buf) + got, r->content_len - got);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (n <= 0) { send_error(r, engine::Err::Io, "receive failed"); return ESP_OK; }
+        got += static_cast<std::size_t>(n);
+    }
+    const int bad = cat_eyes_efx_check(buf, got);
+    if (bad != 0) { send_error(r, engine::Err::BadClip, cat_eyes_efx_error(bad)); return ESP_OK; }
+    auto put = storage::efx_put(name, {buf, got});
+    if (!put) {
+        const auto e = put.error();
+        send_error(r, e, e == engine::Err::NoSpace ? "all effect slots are used: delete one, or reuse a name to replace it"
+                         : e == engine::Err::Conflict ? "a clip with this name exists"
+                         : e == engine::Err::BadName ? "name is a built-in animation"
+                                                     : "could not store the effect");
+        return ESP_OK;
+    }
+    char b[160];
+    std::snprintf(b, sizeof b, R"({"name":"%.31s","size":%lu,"duration_ms":%u,"shapes":%u})", put->name.c_str(),
+                  static_cast<unsigned long>(put->size), put->duration_ms, put->shapes);
+    send_json(r, "201 Created", b);
+    return ESP_OK;
+}
+
+esp_err_t delete_efx(httpd_req_t* r) {
+    if (!authorized(r)) return ESP_OK;
+    auto d = storage::efx_remove(efx_uri_name(r));
+    if (!d) { send_error(r, d.error(), "no such effect"); return ESP_OK; }
+    httpd_resp_set_status(r, "204 No Content");
+    httpd_resp_send(r, nullptr, 0);
+    return ESP_OK;
+}
+
 std::atomic<bool> g_ota_busy{false};
 
 void reboot_later(void*) {
@@ -292,11 +373,20 @@ extern const char index_html_end[] asm("_binary_index_html_end");
 
 extern const char encoder_js_start[] asm("_binary_clip_encoder_js_start");
 extern const char encoder_js_end[] asm("_binary_clip_encoder_js_end");
+extern const char efx_compile_js_start[] asm("_binary_efx_compile_js_start");
+extern const char efx_compile_js_end[] asm("_binary_efx_compile_js_end");
 
 esp_err_t get_encoder(httpd_req_t* r) {
     httpd_resp_set_type(r, "application/javascript");
     httpd_resp_set_hdr(r, "Cache-Control", "no-cache");
     httpd_resp_send(r, encoder_js_start, encoder_js_end - encoder_js_start - 1);
+    return ESP_OK;
+}
+
+esp_err_t get_efx_compile(httpd_req_t* r) {
+    httpd_resp_set_type(r, "application/javascript");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-cache");
+    httpd_resp_send(r, efx_compile_js_start, efx_compile_js_end - efx_compile_js_start - 1);
     return ESP_OK;
 }
 
@@ -326,8 +416,13 @@ esp_err_t get_animations(httpd_req_t* r) {  // catalogue + current state; no aut
         first = false;
         b += '"'; b.append(eyes::kStyleNames[i]); b += "\":\""; b.append(eyes::kSpecialNames[i]); b += '"';
     }
+    b += "},\"custom\":[";
+    if (auto l = storage::efx_list()) {
+        bool f2 = true;
+        for (const auto& e : *l) { if (!f2) b += ','; f2 = false; b += '"'; b.append(e.name.view()); b += '"'; }
+    }
     const auto i = engine::eye_info();
-    b += "},\"state\":{\"style\":\""; b.append(i.style_name); b += "\",\"iris\":\""; b.append(i.iris_name);
+    b += "],\"state\":{\"style\":\""; b.append(i.style_name); b += "\",\"iris\":\""; b.append(i.iris_name);
     b += "\",\"auto\":"; b += i.auto_idle ? "true" : "false"; b += ",\"anim\":\""; b.append(i.anim); b += "\"}}";
     send_json(r, "200 OK", b.c_str());
     return ESP_OK;
@@ -340,7 +435,7 @@ std::expected<void, engine::Err> start() noexcept {
     g_token = net::token();
     httpd_config_t c = HTTPD_DEFAULT_CONFIG();
     c.stack_size = 6144;
-    c.max_uri_handlers = 16;
+    c.max_uri_handlers = 20;
     c.recv_wait_timeout = 10;
     c.send_wait_timeout = 10;
     c.max_open_sockets = 4;
@@ -351,6 +446,7 @@ std::expected<void, engine::Err> start() noexcept {
     const httpd_uri_t routes[] = {
         {.uri = "/", .method = HTTP_GET, .handler = get_root, .user_ctx = nullptr},
         {.uri = "/clip_encoder.js", .method = HTTP_GET, .handler = get_encoder, .user_ctx = nullptr},
+        {.uri = "/efx_compile.js", .method = HTTP_GET, .handler = get_efx_compile, .user_ctx = nullptr},
         {.uri = "/api/status", .method = HTTP_GET, .handler = get_status, .user_ctx = nullptr},
         {.uri = "/api/animations", .method = HTTP_GET, .handler = get_animations, .user_ctx = nullptr},
         {.uri = "/api/eye", .method = HTTP_POST, .handler = post_eye, .user_ctx = nullptr},
@@ -362,6 +458,9 @@ std::expected<void, engine::Err> start() noexcept {
         {.uri = "/api/clips", .method = HTTP_GET, .handler = get_clips, .user_ctx = nullptr},
         {.uri = "/api/clips/*", .method = HTTP_PUT, .handler = put_clip, .user_ctx = nullptr},
         {.uri = "/api/clips/*", .method = HTTP_DELETE, .handler = delete_clip, .user_ctx = nullptr},
+        {.uri = "/api/efx", .method = HTTP_GET, .handler = get_efx, .user_ctx = nullptr},
+        {.uri = "/api/efx/*", .method = HTTP_PUT, .handler = put_efx, .user_ctx = nullptr},
+        {.uri = "/api/efx/*", .method = HTTP_DELETE, .handler = delete_efx, .user_ctx = nullptr},
     };
     for (const auto& u : routes) httpd_register_uri_handler(h, &u);
     ESP_LOGI(kTag, "http server up");

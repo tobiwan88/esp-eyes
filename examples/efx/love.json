@@ -1,0 +1,31 @@
+{
+  "name": "love",
+  "duration": 3000,
+  "gaze": [
+    {"t": 0, "x": 0, "y": 0},
+    {"t": 400, "x": 0, "y": -0.2, "pupil": 0.8, "lid": 0.0},
+    {"t": 2600, "x": 0, "y": -0.2, "pupil": 0.8, "lid": 0.0},
+    {"t": 3000, "x": 0, "y": 0}
+  ],
+  "shapes": [
+    {"kind": "heart", "easing": "back", "loop": true,
+     "keys": [
+       {"t": 0,   "x": 120, "y": 120, "size": 0,  "color": "#ff2a5f"},
+       {"t": 500, "x": 120, "y": 120, "size": 52, "color": "#ff2a5f"},
+       {"t": 700, "x": 120, "y": 120, "size": 44, "color": "#ff5c8a"},
+       {"t": 900, "x": 120, "y": 120, "size": 52, "color": "#ff2a5f"}
+     ]},
+    {"kind": "heart", "eyes": "both", "easing": "out",
+     "keys": [
+       {"t": 900,  "x": 150, "y": 190, "size": 0,  "color": "#ff9ab8"},
+       {"t": 1300, "x": 160, "y": 150, "size": 14, "color": "#ff9ab8"},
+       {"t": 2500, "x": 175, "y": 40,  "size": 10, "color": "#ffd0dc"}
+     ]},
+    {"kind": "sparkle", "easing": "smooth", "loop": true,
+     "keys": [
+       {"t": 600, "x": 60, "y": 70, "size": 0,  "color": "#ffffff"},
+       {"t": 900, "x": 60, "y": 70, "size": 12, "color": "#fff0a0"},
+       {"t": 1200, "x": 60, "y": 70, "size": 0, "color": "#ffffff"}
+     ]}
+  ]
+}

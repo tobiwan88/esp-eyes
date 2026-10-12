@@ -20,6 +20,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -121,6 +122,19 @@ int cat_eyes_iris_from_name(const char *name);  /* "amber","odd",...         */
 int cat_eyes_anim_from_name(const char *name);  /* "wink","slow_blink",...  */
 const char *cat_eyes_anim_name(cat_anim_t anim);/* "special" -> style's name */
 cat_anim_t cat_eyes_current_anim(void);
+
+/* Custom effects (.efx, see docs/efx-format.md) ------------------------- */
+#define CAT_EFX_MAX_BYTES 4096
+#define CAT_EFX_MAX_SHAPES 16
+#define CAT_EFX_MAX_KEYS 12
+#define CAT_EFX_MAX_GAZE 12
+/* 0 = valid, else an error code; cat_eyes_efx_error() gives a readable text. */
+int cat_eyes_efx_check(const uint8_t *data, size_t len);
+const char *cat_eyes_efx_error(int code);
+/* Start the effect. `data` is NOT copied: it must stay valid and unchanged until
+ * another animation starts. Returns false (and does nothing) if it is invalid.
+ * While it runs, cat_eyes_anim_name(cat_eyes_current_anim()) is `name`.      */
+bool cat_eyes_efx_play(const char *name, const uint8_t *data, size_t len);
 
 /* Frame ----------------------------------------------------------------- */
 /* Advance animations and build the next frame for both eyes. Call once per

@@ -37,6 +37,30 @@ button:active{border-color:var(--accent)}
 .hint{text-align:center;color:var(--muted);font-size:.85rem;margin:8px 0 0}
 #status{font-size:.9rem;color:var(--muted);min-height:1.4em}
 #err{color:var(--err);font-size:.9rem;min-height:1.4em;margin-top:6px}
+.intro{margin:0 0 10px;font-size:.92rem}
+.intro span{display:block}
+.estat{font-size:.9rem;min-height:1.4em;margin-top:8px;overflow-wrap:anywhere}
+.ok{color:#2e7d32}
+.bad{color:var(--err)}
+@media (prefers-color-scheme: dark){.ok{color:#6fcf7a}}
+.step{display:flex;gap:10px;align-items:flex-start;margin:14px 0 4px}
+.step>b{flex:0 0 26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:26px;font-size:.9rem}
+.step>div{flex:1;min-width:0}
+.step h3{margin:2px 0 6px;font-size:1rem}
+.bigbtn{display:block;text-align:center;font-size:1.05rem;font-weight:600;color:#fff;background:var(--accent);border-radius:10px;padding:14px 10px;margin:0;cursor:pointer}
+.bigbtn:active{opacity:.85}
+.filehide{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.filehide:focus-visible+.bigbtn,.filehide:focus+.bigbtn{outline:3px solid var(--fg);outline-offset:2px}
+.fname{font-size:.9rem;margin:6px 0 0;overflow-wrap:anywhere;color:var(--muted)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;padding:14px 10px;font-size:1.05rem}
+button.primary:disabled{opacity:.45;cursor:default}
+details{margin-top:12px;font-size:.9rem}
+summary{cursor:pointer;color:var(--accent)}
+.drop.over{outline:2px dashed var(--accent);outline-offset:4px}
+.efx-list{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.efx-list .row{align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.efx-list .row>span{overflow-wrap:anywhere}
+.efx-list .row>button{flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -45,29 +69,32 @@ button:active{border-color:var(--accent)}
 
 <section>
   <div class="row">
-    <div><label for="style">Style</label><select id="style"></select></div>
-    <div><label for="iris">Iris</label><select id="iris"></select></div>
+    <div><label for="style">Eye style</label><select id="style"></select></div>
+    <div><label for="iris">Eye colour</label><select id="iris"></select></div>
   </div>
-  <label class="check"><input type="checkbox" id="auto"> Random idle animations</label>
+  <label class="check"><input type="checkbox" id="auto"> Let the cat do things on its own</label>
 </section>
 
 <section>
+  <h2>Play an animation</h2>
+  <p class="hint" style="text-align:left;margin:0 0 8px">Tap one to play it now.</p>
   <div class="grid" id="anims"></div>
   <div class="row more">
     <button data-play="blink">Blink</button>
-    <button data-play="random">Random</button>
+    <button data-play="random">Surprise me</button>
   </div>
 </section>
 
 <section>
-  <h2>Random pool</h2>
+  <h2>What the cat may do on its own</h2>
+  <p class="hint" style="text-align:left;margin:0 0 8px">Tick what may appear when the cat is on its own.</p>
   <div class="grid pool" id="plist"></div>
   <div class="row more">
-    <button id="pall">Select all</button>
-    <button id="pnone">Select none</button>
+    <button id="pall">Tick all</button>
+    <button id="pnone">Untick all</button>
   </div>
-  <p class="hint" id="phint" hidden>Nothing selected: random mode stays still</p>
-  <label for="pmin">Pause between animations (s): min / max</label>
+  <p class="hint" id="phint" hidden>Nothing ticked: the cat will not play animations on its own</p>
+  <label for="pmin">Seconds between two animations (shortest / longest)</label>
   <div class="row">
     <input class="inp" id="pmin" type="number" min="0" step="0.1">
     <input class="inp" id="pmax" type="number" min="0" step="0.1">
@@ -76,9 +103,10 @@ button:active{border-color:var(--accent)}
 </section>
 
 <section>
-  <h2>Add animation from a GIF</h2>
-  <label for="gfile">GIF, WebP or PNG</label>
-  <input type="file" id="gfile" accept="image/gif,image/webp,image/png,.gif">
+  <h2>Add a moving picture (GIF)</h2>
+  <input type="file" id="gfile" class="filehide" accept="image/gif,image/webp,image/png,.gif">
+  <label for="gfile" class="bigbtn">Choose GIF&hellip;</label>
+  <p class="fname" id="gfname">No file chosen yet.</p>
   <div class="row">
     <div><label for="gfit">Fit</label><select id="gfit"><option>cover</option><option>contain</option></select></div>
     <div><label for="gfps">Frame rate cap (fps, optional)</label><input class="inp" id="gfps" type="number" min="1" max="30" step="0.5" placeholder="original"></div>
@@ -89,9 +117,45 @@ button:active{border-color:var(--accent)}
   <input class="inp" id="gname" type="text" maxlength="31">
   <label class="check"><input type="checkbox" id="gpool"> Also add to random pool</label>
   <div class="row more">
-    <button id="ggo">Convert &amp; upload</button>
+    <button id="ggo" class="primary">Convert &amp; upload</button>
     <span class="muted" id="gprog"></span>
   </div>
+</section>
+
+<section id="efsec" class="drop">
+  <h2>Your own animations <span class="muted" id="efree"></span></h2>
+  <p class="hint" style="text-align:left;margin:0">Add a small extra animation, for example a heart over the eyes. It then appears as a button with a star (&#9733;) at the top of this page.</p>
+
+  <div class="step"><b>1</b><div>
+    <h3>Choose the file</h3>
+    <input type="file" id="efile" class="filehide" accept="*/*">
+    <label for="efile" class="bigbtn">Choose file&hellip;</label>
+    <p class="fname" id="efname">No file chosen yet. You can also drop a file here.</p>
+    <div class="estat" id="estat" role="status" aria-live="polite"></div>
+  </div></div>
+
+  <div class="step"><b>2</b><div>
+    <h3>Give it a name</h3>
+    <input class="inp" id="ename" type="text" maxlength="31" autocomplete="off" autocapitalize="off" placeholder="for example: heart">
+    <p class="hint" id="ehint" style="text-align:left"></p>
+    <label class="check"><input type="checkbox" id="epool"> Let the cat also play it on its own</label>
+  </div></div>
+
+  <div class="step"><b>3</b><div>
+    <h3>Send it to the cat</h3>
+    <button id="eup" class="primary" style="width:100%" disabled>Upload and play</button>
+  </div></div>
+
+  <div class="efx-list">
+    <h3 style="margin:0 0 4px;font-size:.95rem">Already on the cat</h3>
+    <div id="efxs"></div>
+    <p class="hint" id="enone" hidden>Nothing yet</p>
+  </div>
+  <details>
+    <summary>Where do I get such a file?</summary>
+    <p>Ask an AI assistant such as Claude to describe the animation for you (the prompt is in the project folder: <code>docs/efx-prompt.md</code>). It answers with a text in curly brackets. Save that text as a file whose name ends in <code>.json</code>, then choose it here. Any file name works.</p>
+    <p>Using the name of an existing animation replaces it. There is room for 16 of your own.</p>
+  </details>
 </section>
 
 <section>
@@ -121,6 +185,7 @@ button:active{border-color:var(--accent)}
 </main>
 
 <script src="/clip_encoder.js"></script>
+<script src="/efx_compile.js"></script>
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
@@ -131,6 +196,8 @@ button:active{border-color:var(--accent)}
     plist: $('plist'), pall: $('pall'), pnone: $('pnone'), phint: $('phint'),
     pmin: $('pmin'), pmax: $('pmax'), psave: $('psave'),
     clips: $('clips'), free: $('free'), stop: $('stop'),
+    efsec: $('efsec'), efname: $('efname'), efxs: $('efxs'), efree: $('efree'), efile: $('efile'), ename: $('ename'), epool: $('epool'),
+    eup: $('eup'), estat: $('estat'), ehint: $('ehint'), enone: $('enone'),
     cfile: $('cfile'), cname: $('cname'), cup: $('cup'), cprog: $('cprog')
   };
   var meta = null;
@@ -192,6 +259,12 @@ button:active{border-color:var(--accent)}
       if (a === 'special') ui.special = b;
       ui.anims.appendChild(b);
     });
+    (meta.custom || []).forEach(function (a) {
+      var b = document.createElement('button');
+      b.dataset.play = a;
+      b.textContent = '\u2605 ' + label(a);
+      ui.anims.appendChild(b);
+    });
     updateSpecial();
   }
 
@@ -231,10 +304,10 @@ button:active{border-color:var(--accent)}
       c.onchange = schedulePool;
       l.appendChild(c);
       l.appendChild(document.createTextNode(' ' + label(it.name)));
-      if (it.kind === 'clip') {
+      if (it.kind === 'clip' || it.kind === 'fx') {
         var t = document.createElement('span');
         t.className = 'tag';
-        t.textContent = 'clip';
+        t.textContent = it.kind === 'fx' ? 'effect' : 'clip';
         l.appendChild(t);
       }
       ui.plist.appendChild(l);
@@ -300,8 +373,140 @@ button:active{border-color:var(--accent)}
     api('POST', '/api/play', body).then(function () { setErr(''); }, fail);
   }
 
+  function renderEffects(j) {
+    efxList = j.effects.map(function (e) { return e.name; });
+    efxSlots = j.slots;
+    ui.efree.textContent = j.effects.length + ' of ' + j.slots + ' slots used';
+    ui.enone.hidden = j.effects.length > 0;
+    ui.efxs.innerHTML = '';
+    j.effects.forEach(function (e) {
+      var row = document.createElement('div');
+      row.className = 'row';
+      var n = document.createElement('span');
+      n.textContent = label(e.name) + ' (' + (e.duration_ms / 1000).toFixed(1) + ' s)';
+      row.appendChild(n);
+      [['play', 'Play'], ['del', 'Delete']].forEach(function (a) {
+        var b = document.createElement('button');
+        b.textContent = a[1];
+        b.dataset.act = a[0];
+        b.dataset.name = e.name;
+        row.appendChild(b);
+      });
+      ui.efxs.appendChild(row);
+    });
+    updateSlotHint();
+  }
+
+  // Custom effects section: every step reports in ui.estat, inside the section
+  var efxList = null, efxSlots = 16;
+  var chosen = null;        // { bytes, name, info, converted } for the file on screen
+  var chooseSeq = 0;        // ignores results of a file read that was overtaken
+  var nameTyped = false;    // the user typed a name since the last automatic fill
+
+  function setStat(msg, cls) {
+    ui.estat.className = 'estat' + (cls ? ' ' + cls : '');
+    ui.estat.textContent = msg || '';
+  }
+  function errText(e) { return e instanceof TypeError ? 'Network error' : ((e && e.message) || String(e)); }
+
+  function effectExists(n) { return !!efxList && efxList.indexOf(n) >= 0; }
+
+  function slotsFullFor(n) { return !!efxList && n !== '' && !effectExists(n) && efxList.length >= efxSlots; }
+
+  function updateSlotHint() {
+    var n = ui.ename.value.trim();
+    var msg = '';
+    if (slotsFullFor(n)) msg = 'All ' + efxSlots + ' slots used: choose an existing name to replace it or delete one';
+    else if (n && effectExists(n)) msg = 'This name replaces the existing effect "' + label(n) + '"';
+    ui.ehint.textContent = msg;
+    ui.ehint.className = slotsFullFor(n) ? 'hint bad' : 'hint';
+  }
+
+  function readBytes(f) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(new Uint8Array(r.result)); };
+      r.onerror = function () { reject(new Error('Could not read the file')); };
+      r.readAsArrayBuffer(f);
+    });
+  }
+
+  // Best-effort parse of a JSON file, only used to read its "name"
+  function jsonDoc(bytes) {
+    if (bytes.length >= 4 && bytes[0] === 0x45 && bytes[1] === 0x46 && bytes[2] === 0x58 && bytes[3] === 0x31) return null;
+    try { return JSON.parse(new TextDecoder('utf-8').decode(bytes).replace(/^﻿/, '')); } catch (e) { return null; }
+  }
+
+  function chooseEffect(f) {
+    var seq = ++chooseSeq;
+    ui.efname.textContent = f ? 'Chosen: ' + f.name : 'No file chosen yet. You can also drop a file here.';
+    chosen = null;
+    ui.eup.disabled = true;
+    setStat('', '');
+    if (!f) return;
+    setStat('Reading the file…', 'muted');
+    readBytes(f).then(function (bytes) {
+      if (seq !== chooseSeq) return;
+      var r = EfxCompile.fromBytes(bytes);
+      var doc = jsonDoc(bytes) || {};
+      var suggested = EfxCompile.suggestName(doc, f.name);
+      if (!nameTyped) ui.ename.value = suggested;
+      nameTyped = false;
+      chosen = { bytes: r.bytes, converted: r.converted, info: r.info };
+      var i = r.info || {};
+      var line = 'Looks good: an animation of ' + (i.duration / 1000).toFixed(1) + ' seconds.';
+      setStat(line, 'ok');
+      ui.eup.disabled = false;
+      updateSlotHint();
+    }).catch(function (e) {
+      if (seq !== chooseSeq) return;
+      setStat(errText(e), 'bad');
+      ui.eup.disabled = true;
+    });
+  }
+
+  function dropEffect(e) {
+    e.preventDefault();
+    ui.efsec.classList.remove('over');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    try { ui.efile.files = e.dataTransfer.files; } catch (err) { /* older browsers: the input keeps its old name */ }
+    chooseEffect(f);
+  }
+
+  function uploadEffect() {
+    var name = ui.ename.value.trim().toLowerCase();
+    if (!chosen) { setStat('Choose an effect file first', 'bad'); return; }
+    if (!name) { setStat('Please type a name', 'bad'); return; }
+    if (!/^[a-z0-9_-]{1,31}$/i.test(name)) { setStat('Name: use letters, digits, _ or - (max 31)', 'bad'); return; }
+    if (slotsFullFor(name)) { setStat(ui.ehint.textContent, 'bad'); return; }
+    var blob = new Blob([chosen.bytes], { type: 'application/octet-stream' });
+    ui.eup.disabled = true;
+    setStat('Uploading…', 'muted');
+    api('PUT', '/api/efx/' + encodeURIComponent(name), blob).then(function () {
+      if (!ui.epool.checked) return null;
+      return api('GET', '/api/pool').then(function (p) {
+        var on = p.items.filter(function (i) { return i.enabled; }).map(function (i) { return i.name; });
+        if (on.indexOf(name) < 0) on.push(name);
+        return api('POST', '/api/pool', { enabled: on });
+      });
+    }).then(function () {
+      return api('POST', '/api/eye', { play: name });
+    }).then(function () {
+      setStat('Done! "' + label(name) + '" is playing now and has a star button at the top.', 'ok');
+      return refresh();
+    }).then(reloadGrid).catch(function (e) {
+      setStat(errText(e), 'bad');
+    }).then(function () { ui.eup.disabled = !chosen; });
+  }
+
+  function reloadGrid() {
+    return fetch('/api/animations').then(function (r) { return r.json(); }).then(function (j) { meta = j; buildGrid(); });
+  }
+
   function refresh() {
     return Promise.all([
+      api('GET', '/api/efx').then(renderEffects),
       api('GET', '/api/clips').then(renderClips),
       api('GET', '/api/pool').then(renderPool)
     ]);
@@ -336,6 +541,33 @@ button:active{border-color:var(--accent)}
       play(name, b.dataset.act === 'loop');
     }
   };
+  ui.efxs.onclick = function (e) {
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if (!b) return;
+    var name = b.dataset.name;
+    if (b.dataset.act === 'del') {
+      if (!confirm('Delete effect ' + name + '?')) return;
+      setStat('Deleting\u2026', 'muted');
+      api('DELETE', '/api/efx/' + encodeURIComponent(name)).then(refresh).then(reloadGrid).then(function () {
+        setStat('Deleted ' + name, 'ok');
+      }).catch(function (err) { setStat(errText(err), 'bad'); });
+    } else {
+      setStat('Playing ' + name + '\u2026', 'muted');
+      api('POST', '/api/eye', { play: name }).then(function () {
+        setStat('Playing ' + name, 'ok');
+      }).catch(function (err) { setStat(errText(err), 'bad'); });
+    }
+  };
+  $('gfile').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    $('gfname').textContent = f ? 'Chosen: ' + f.name : 'No file chosen yet.';
+  });
+  ui.efile.onchange = function () { chooseEffect(ui.efile.files[0]); };
+  ui.ename.oninput = function () { nameTyped = true; updateSlotHint(); };
+  ui.eup.onclick = uploadEffect;
+  ui.efsec.ondragover = function (e) { e.preventDefault(); ui.efsec.classList.add('over'); };
+  ui.efsec.ondragleave = function (e) { if (!ui.efsec.contains(e.relatedTarget)) ui.efsec.classList.remove('over'); };
+  ui.efsec.ondrop = dropEffect;
   ui.stop.onclick = function () { api('POST', '/api/stop', {}).then(function () { setErr(''); }, fail); };
 
   ui.cfile.onchange = function () {

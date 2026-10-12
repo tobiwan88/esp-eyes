@@ -104,8 +104,12 @@ void cat_eyes_play(cat_anim_t id)
 {
     if ((unsigned)id >= CAT_ANIM_COUNT) return;
     if (id == CAT_ANIM_SPECIAL && !g_ce_styles[g_ce.style].special_name) return;
+    ce_start_anim(id);
+}
+void ce_start_anim(cat_anim_t id)
+{
     ce_anim_build(id, &g_ce.anim);
-    if (id >= CAT_ANIM_FX_FIRST && id <= CAT_ANIM_FX_LAST) ce_fx_begin(id);
+    if (CE_IS_FX(id)) ce_fx_begin(id);
     g_ce.anim_on = true; g_ce.anim_start = g_ce.now; g_ce.last_anim = id;
 }
 void cat_eyes_blink(void) { g_ce.blink_start = g_ce.now; }
@@ -135,6 +139,7 @@ int cat_eyes_anim_from_name(const char *n)
 }
 const char *cat_eyes_anim_name(cat_anim_t a)
 {
+    if (a == CE_ANIM_EFX) return ce_efx_name();
     if ((unsigned)a >= CAT_ANIM_COUNT) return "idle";
     if (a == CAT_ANIM_SPECIAL && g_ce_styles[g_ce.style].special_name) return g_ce_styles[g_ce.style].special_name;
     return k_anim_names[a];
@@ -188,7 +193,7 @@ void cat_eyes_tick(uint32_t now)
         g_ce.anim_on = false; g_ce.next_anim = now + (uint32_t)ce_randf(2500, 7000);
     }
     if (g_ce.auto_idle && !g_ce.anim_on && (int32_t)(now - g_ce.next_anim) > 0) cat_eyes_play(pick());
-    const bool fx = g_ce.anim_on && g_ce.anim.id >= CAT_ANIM_FX_FIRST && g_ce.anim.id <= CAT_ANIM_FX_LAST;
+    const bool fx = g_ce.anim_on && CE_IS_FX(g_ce.anim.id);
     if ((int32_t)(now - g_ce.next_blink) > 0) {
         if (!anim_drives(0, P_UPPER) && !fx) g_ce.blink_start = now;
         g_ce.next_blink = now + ((ce_rand() % 100) < 15 ? 350 : (uint32_t)ce_randf(2500, 7000));

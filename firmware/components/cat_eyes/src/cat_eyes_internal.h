@@ -178,6 +178,15 @@ void ce_sh_clip(ce_frame_t *f, int layer, int first, int y0, int y1);
 #define CE_GLYPH_COUNT 20
 extern const uint8_t g_ce_font[CE_GLYPH_COUNT][7];
 
+/* custom effects (cat_eyes_efx.c): played as a pseudo animation id one past the enum */
+#define CE_ANIM_EFX ((cat_anim_t)CAT_ANIM_COUNT)
+#define CE_IS_FX(id) (((id) >= CAT_ANIM_FX_FIRST && (id) <= CAT_ANIM_FX_LAST) || (id) == CE_ANIM_EFX)
+uint16_t ce_efx_duration(void);
+void ce_efx_params(float t_ms, float *p);
+void ce_efx_draw(int eye, float t_ms, ce_frame_t *f);
+const char *ce_efx_name(void);
+void ce_start_anim(cat_anim_t id);   /* cat_eyes.c: no range check */
+
 /* effects (cat_eyes_fx.c) */
 uint16_t ce_fx_duration(cat_anim_t id);
 void ce_fx_begin(cat_anim_t id);                                   /* randomise a new run   */

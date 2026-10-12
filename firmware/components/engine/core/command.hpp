@@ -43,6 +43,7 @@ struct EyeCmd {
     std::optional<bool> auto_idle;                        // random idle animations on/off
     std::optional<std::array<std::int16_t, 2>> look_q8;   // gaze -256..256 (= -1..1)
     std::uint16_t hold_ms = 1000;                         // gaze hold time for look
+    StaticString<31> fx;                                  // custom effect (.efx) to play; the caller checks it exists
     bool save = false;                                    // persist style + iris + auto
 };
 

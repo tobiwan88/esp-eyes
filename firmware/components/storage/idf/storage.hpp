@@ -22,6 +22,18 @@ struct ClipInfo { engine::StaticString<31> name; std::uint32_t size; std::uint16
 [[nodiscard]] std::uint32_t max_clip_bytes() noexcept;
 [[nodiscard]] bool path_for(std::string_view name, char* out, std::size_t cap) noexcept;  // /fs/clips/<name>.clip
 
+// Custom effects (.efx files, see docs/efx-format.md): at most kMaxEfx slots in /fs/efx, each <= kMaxEfxBytes.
+// Uploading under an existing name replaces it; when all slots are taken a new name is refused (NoSpace).
+inline constexpr int kMaxEfx = 16;
+inline constexpr std::size_t kMaxEfxBytes = 4096;
+struct EfxInfo { engine::StaticString<31> name; std::uint32_t size; std::uint16_t duration_ms; std::uint8_t shapes; };
+[[nodiscard]] std::expected<std::vector<EfxInfo>, engine::Err> efx_list() noexcept;
+[[nodiscard]] bool efx_exists(std::string_view name) noexcept;
+// Validates (BadClip), refuses built-in animation names (BadName) and clip names (Conflict), then writes atomically.
+[[nodiscard]] std::expected<EfxInfo, engine::Err> efx_put(std::string_view name, std::span<const std::uint8_t> data) noexcept;
+[[nodiscard]] std::expected<void, engine::Err> efx_remove(std::string_view name) noexcept;
+[[nodiscard]] std::expected<std::size_t, engine::Err> efx_read(std::string_view name, std::span<std::uint8_t> out) noexcept;
+
 // "Playing" registry: players mark the clip they hold open so it cannot be replaced or deleted.
 void mark_playing(int slot, std::string_view name) noexcept;
 void clear_playing(int slot) noexcept;
